@@ -41,6 +41,15 @@
     "chunk_probes_per_cycle": 1
   },
 
+  "command": {
+    "comment": "命令闸门：这个插件跑在共享的聊天环境里，命令会触发真实流量。三道闸都默认打开——只在通知会话里响应、会打流量的命令限管理员、重命令有最小间隔。",
+    "respond_anywhere": false,
+    "allow_sessions": [],
+    "heavy_admin_only": true,
+    "privileged_admin_only": true,
+    "cooldown_seconds": 60
+  },
+
   "alert": {
     "comment": "告警行为。fire_after 是「三轮里坏两轮才报」，remind_every 是持续故障的重复提醒间隔——不是每轮都刷（CLAUDE.md 铁律 6）。",
     "fire_after": [2, 3],

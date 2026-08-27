@@ -112,7 +112,7 @@ class AllMirrorsDownTest(unittest.TestCase):
         self.assertIn("线路甲", msg)
         self.assertIn("线路乙", msg)
         # 告警自己要把「已经排除了什么」说出来
-        self.assertIn("上游线上配置：正常", msg)
+        self.assertIn("上游配置源：正常", msg)
 
     def test_recovery_is_announced(self):
         client = healthy_client()

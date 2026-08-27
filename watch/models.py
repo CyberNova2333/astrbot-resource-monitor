@@ -160,13 +160,5 @@ class OnlineConfig:
     def enabled_mirrors(self) -> List[Mirror]:
         return [m for m in self.mirrors if m.enabled]
 
-    def threshold(self, name: str) -> Optional[float]:
-        """取一个阈值。**取不到返回 None，不返回兜底值。**
-
-        调用方拿到 None 时应当把对应判据标成 unknown（不报警），而不是拿一个
-        写死的数字接着算——那就是「插件里留了第二份判据」。
-        """
-        v = self.settings.get(name)
-        if isinstance(v, bool) or not isinstance(v, (int, float)):
-            return None
-        return float(v)
+    # 阈值不在这里取：判据层只认 sources.Discovered，那边有唯一一份
+    # threshold()。这里再放一份就是两份判据，迟早长歪。

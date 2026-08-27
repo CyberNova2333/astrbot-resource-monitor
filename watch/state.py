@@ -24,12 +24,11 @@ bot 一重启，内存里的状态全没了，所有仍在持续的故障都会�
 
 from __future__ import annotations
 
-import json
-import os
 import time
 from dataclasses import asdict, dataclass, field
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
+from . import store
 from .models import ProbeResult, Severity
 
 GREEN = "GREEN"
@@ -119,9 +118,29 @@ class AlertState:
             if note:
                 out.append(note)
 
+        # 干净的条目不留：块校验的键是 (线路, 文件, 块号)，一条线路几百块，
+        # 不清理的话状态表会随时间涨到几千条，还每轮全量写盘一次。
+        # 判据是「这条还有没有信息量」——见 _evict_clean。
+        self._evict_clean()
+
         if self.is_muted(now):
             return []
         return out
+
+    def _evict_clean(self) -> int:
+        """删掉**完全干净**的条目：不在报警、窗口里没有失败、且已经连续成功到
+        足以恢复。
+
+        这三条同时成立时，这个条目记住的东西与「从没见过它」完全等价——留着
+        只是让状态表和状态文件无限长大。任何一条不成立都保留：窗口里有失败要
+        参与「三轮里坏两轮」，FIRING 中的要等恢复，正在恢复的要数够连续成功。
+        """
+        gone = [k for k, e in self.entries.items()
+                if e.status == GREEN and not any(e.window)
+                and e.successes >= self.recover_after]
+        for k in gone:
+            del self.entries[k]
+        return len(gone)
 
     def _advance(self, entry: Entry, r: ProbeResult, now: float,
                  firing_keys: set) -> Optional[Notification]:
@@ -210,19 +229,7 @@ class AlertState:
             )
 
     def save(self, path: str) -> None:
-        """尽力而为：写不进去就算了，状态是可丢的，不值得让监控本身崩掉。"""
-        try:
-            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-            tmp = path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self.to_dict(), f, ensure_ascii=False)
-            os.replace(tmp, path)          # 原子替换，避免半截文件
-        except OSError:
-            pass
+        store.save_json(path, self.to_dict())
 
     def load(self, path: str) -> None:
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                self.load_dict(json.load(f))
-        except (OSError, ValueError):
-            pass                            # 没有/坏了 = 当作全新开始
+        self.load_dict(store.load_json(path) or {})

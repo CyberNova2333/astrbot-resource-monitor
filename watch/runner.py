@@ -22,15 +22,14 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field, replace
-from typing import Dict, List, Optional, Sequence, Tuple
-from urllib.parse import urlparse
+from typing import Dict, List, Optional, Sequence
 
 from . import probes, render, sources
 from .config import LocalConfig
 from .http import HttpClient
-from .models import FileEntry, Mirror, ProbeResult, Severity
+from .models import FileEntry, Mirror, ProbeResult
 from .scheduler import CoverageReport, HotPackagePolicy, Rotation, Ticker
-from .sources import Discovered, Source
+from .sources import Discovered, PROBE_SOURCE, Source, host_of
 from .state import AlertState
 
 NOTE_CLIENT_VERSION = "client_version"
@@ -79,7 +78,14 @@ class Monitor:
 
     # ── 一轮 ────────────────────────────────────────────────
     async def run_cycle(self, *, slow: bool = False, only_mirror: Optional[str] = None,
+                        allow_heavy: bool = True,
                         now: Optional[float] = None) -> CycleOutcome:
+        """跑一轮。
+
+        `allow_heavy=False` 时不做整包核对（几百 MB）——**命令触发的轮次一律
+        用它**：群里一条命令不该能让我们去下几百 MB，哪怕发命令的人是管理员，
+        也哪怕他只是手滑连发了两次。
+        """
         now = now if now is not None else time.time()
         out = CycleOutcome()
 
@@ -106,7 +112,10 @@ class Monitor:
         if disc.client_version:
             self.state.remember(NOTE_CLIENT_VERSION, disc.client_version)
 
-        mirrors = [m for m in disc.enabled_mirrors
+        # 线路表来自配置源＝远端内容：先挡住指向本机/内网的地址，再拿去探。
+        safe_mirrors, blocked = probes.check_mirror_targets(disc)
+        out.results.extend(blocked)
+        mirrors = [m for m in safe_mirrors
                    if only_mirror is None or m.name == only_mirror]
         if only_mirror is not None and not mirrors:
             out.results.append(ProbeResult(
@@ -136,7 +145,7 @@ class Monitor:
             out.coverage = self.rotation.coverage(reference, now=now)
 
         if slow:
-            out.results.extend(await self._slow_round(disc, mirrors, now))
+            out.results.extend(await self._slow_round(disc, mirrors, now, allow_heavy))
 
         out.messages = self._notify(out.results, enabled_mirrors=len(disc.enabled_mirrors),
                                     now=now, entry_result=entry_result)
@@ -170,8 +179,8 @@ class Monitor:
                              "线路那边现在是什么状况说不出来")
             return deg
         if age > self.cfg.degraded.stale_config_max_age_seconds:
-            deg.lines.append("旧线路表是 %.1f 小时前的，太旧了不拿它探——"
-                             "过期的线索会把人带偏" % (age / 3600.0))
+            deg.lines.append("旧线路表是 %s前的，太旧了不拿它探——"
+                             "过期的线索会把人带偏" % render.human_duration(age))
             return deg
 
         stale = Discovered.from_snapshot(self.last_good_snapshot)
@@ -188,7 +197,7 @@ class Monitor:
                 result, unknown=True,
                 detail="（旧线路表，仅供参考）" + result.detail))
         deg.lines.append("用 %s前的旧线路表顺带探了一下：%d/%d 条线路的清单还拿得到"
-                         % (_human_age(age), alive, len(mirrors)))
+                         % (render.human_duration(age), alive, len(mirrors)))
         deg.lines.append("→ " + ("线路那边看着是好的，客户端此刻靠内置线路还能撑，"
                                  "但新配置下不去" if alive == len(mirrors) else
                                  ("线路也在挂，用户现在多半真的装不上"
@@ -228,7 +237,7 @@ class Monitor:
 
     # ── 慢周期 ──────────────────────────────────────────────
     async def _slow_round(self, disc: Discovered, mirrors: Sequence[Mirror],
-                          now: float) -> List[ProbeResult]:
+                          now: float, allow_heavy: bool = True) -> List[ProbeResult]:
         out: List[ProbeResult] = []
         version_files = disc.version_files
         if not version_files:
@@ -246,7 +255,7 @@ class Monitor:
                 if meta is None or not meta.is_valid():
                     continue
                 package = disc.packages.get(name)
-                if not package:
+                if not package or not allow_heavy:
                     continue
                 key = "%s|%s" % (mirror.name, package)
                 if not self.hot_policy.should_check(key, meta.version, self.ticker,
@@ -257,7 +266,7 @@ class Monitor:
                 self.ticker.mark(key, now)
                 self.last_versions[key] = meta.version
 
-        for host in sorted({_host(m.base) for m in mirrors if _host(m.base)}):
+        for host in sorted({host_of(m.base) for m in mirrors if host_of(m.base)}):
             if self.ticker.due("tls|%s" % host, 86400.0, now):
                 out.append(await probes.probe_tls_expiry(host, now=now))
                 self.ticker.mark("tls|%s" % host, now)
@@ -275,7 +284,7 @@ class Monitor:
         messages = []
         for group in render.group_notifications(notes, enabled_mirrors):
             # 入口自己那条不需要再附一行「上游正常」——它就是上游。
-            is_entry = group[0].result.probe == probes.PROBE_ENTRY
+            is_entry = group[0].result.probe == PROBE_SOURCE
             # 入口自己那条不需要再附一行「上游正常」——它就是上游。它要附的是
             # 降级诊断：坏到什么程度、下一步该去哪。
             messages.append(render.render_group(
@@ -325,12 +334,6 @@ class Degraded:
     results: List[ProbeResult] = field(default_factory=list)
 
 
-def _human_age(seconds: float) -> str:
-    if seconds < 5400:
-        return "%d 分钟" % int(seconds / 60)
-    return "%.1f 小时" % (seconds / 3600.0)
-
-
 def _majority_manifest(per_mirror: Dict[str, Dict[str, FileEntry]]
                        ) -> Dict[str, FileEntry]:
     """取出现次数最多的那份清单。平票时取文件数最多的一份（能验的更多）。"""
@@ -345,8 +348,4 @@ def _majority_manifest(per_mirror: Dict[str, Dict[str, FileEntry]]
     return best[0]
 
 
-def _host(url: str) -> str:
-    try:
-        return urlparse(url).hostname or ""
-    except ValueError:
-        return ""
+

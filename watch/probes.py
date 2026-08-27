@@ -33,14 +33,13 @@ from __future__ import annotations
 import hashlib
 import re
 import time
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from . import discovery
-from .http import DigestResult, HttpClient, HttpError, HttpResponse, kbps
+from .http import DigestResult, HttpClient, HttpError, elapsed_ms, kbps
 from .models import FileEntry, Mirror, ProbeResult, Severity, VersionMeta
-from .sources import Discovered, KEY_SOURCE, PROBE_SOURCE
+from .sources import Discovered, KEY_SOURCE
 
-PROBE_ENTRY = PROBE_SOURCE          # 兼容旧名
 PROBE_SANITY = "线上配置合理性"
 PROBE_MANIFEST = "清单可达性"
 PROBE_CHUNK = "块内容校验"
@@ -96,6 +95,51 @@ def check_config_mutation(disc: Discovered, last_snapshot: Optional[dict]
                    "不一样，而且监控这边的速率判据也跟着失效",
             severity=Severity.P1, suppress_key=KEY_ENTRY))
     return out
+
+
+def check_mirror_targets(disc: Discovered) -> Tuple[List[Mirror], List[ProbeResult]]:
+    """挡住指向**本机/内网**的线路地址，返回 (可以探的线路, 要报的结果)。
+
+    线路表来自配置源，而配置源是**远端内容**：它被改坏或被劫持时，可以把线路
+    指到 `http://127.0.0.1:8080/` 或 `http://10.0.0.5/` 上，让监控替它去敲部署
+    机自己的内网——这是拿监控当跳板的经典形状（SSRF）。监控没有凭证，能捞到的
+    有限，但「替远端内容访问内网」这件事本身就不该发生。
+
+    判据刻意只认**字面量地址**，不做 DNS 解析：解析要么慢要么会被 TOCTOU 绕过，
+    而且 CDN 域名解析出的地址千奇百怪，一做就会误伤。宁可漏一个用域名伪装的，
+    也不要拦下正常线路（守卫误伤一次，之后就没人信它了）。
+    """
+    import ipaddress
+
+    ok_mirrors: List[Mirror] = []
+    out: List[ProbeResult] = []
+    for m in disc.enabled_mirrors:
+        host = _host_of(m.base)
+        blocked = host.lower() in ("localhost", "localhost.localdomain")
+        if not blocked:
+            try:
+                ip = ipaddress.ip_address(host.strip("[]"))
+                blocked = (ip.is_private or ip.is_loopback or ip.is_link_local
+                           or ip.is_reserved or ip.is_multicast)
+            except ValueError:
+                blocked = False              # 是域名，不解析，放行
+        if blocked:
+            out.append(ProbeResult(
+                ok=False, probe=PROBE_SANITY, target=m.name,
+                detail="线路指向本机/内网地址（%s），已拒绝探测——配置源是远端"
+                       "内容，不该能指挥监控去敲部署机自己的内网" % host,
+                severity=Severity.P1, suppress_key=KEY_ENTRY))
+            continue
+        ok_mirrors.append(m)
+    return ok_mirrors, out
+
+
+def _host_of(url: str) -> str:
+    from urllib.parse import urlparse
+    try:
+        return urlparse(url).hostname or ""
+    except ValueError:
+        return ""
 
 
 def check_config_sanity(disc: Discovered,
@@ -171,7 +215,7 @@ async def probe_manifest(client: HttpClient, mirror: Mirror
     except discovery.DiscoveryError as e:
         return ProbeResult(
             ok=False, probe=PROBE_MANIFEST, target=mirror.name,
-            detail=str(e), elapsed_ms=_ms(t0), severity=Severity.P1,
+            detail=str(e), elapsed_ms=elapsed_ms(t0), severity=Severity.P1,
             suppress_key=KEY_ENTRY), {}
 
     if not entries:
@@ -220,7 +264,7 @@ async def probe_chunk(client: HttpClient, mirror: Mirror, entry: FileEntry,
                                   max_bytes=expect_len + 1024)
     except HttpError as e:
         return [ProbeResult(ok=False, probe=PROBE_CHUNK, target=target,
-                            detail="连接失败：%s" % e, elapsed_ms=_ms(t0),
+                            detail="连接失败：%s" % e, elapsed_ms=elapsed_ms(t0),
                             severity=Severity.P1, suppress_key=manifest_key(mirror))]
 
     if resp.status == 200:
@@ -309,7 +353,7 @@ async def probe_version_json(client: HttpClient, mirror: Mirror, name: str
         resp = await client.fetch(url, headers=discovery.NO_CACHE)
     except HttpError as e:
         return ProbeResult(ok=False, probe=PROBE_VERSION, target="%s#%s" % (mirror.name, name),
-                           detail="连接失败：%s" % e, elapsed_ms=_ms(t0),
+                           detail="连接失败：%s" % e, elapsed_ms=elapsed_ms(t0),
                            severity=Severity.P1, suppress_key=manifest_key(mirror)), None
     if resp.status != 200:
         return ProbeResult(ok=False, probe=PROBE_VERSION, target="%s#%s" % (mirror.name, name),
@@ -350,16 +394,25 @@ async def probe_hot_package(client: HttpClient, mirror: Mirror, package: str,
     target = "%s#%s" % (mirror.name, package)
     t0 = time.monotonic()
     try:
-        res: DigestResult = await client.digest(url)
+        # 上限 = 声称的大小 + 1 MiB 余量。超了就不必再下：内容已经与它声称的
+        # 身份不符，而继续下只是替一条坏线路烧我们自己的带宽。
+        res: DigestResult = await client.digest(url, max_bytes=meta.size + (1 << 20))
     except HttpError as e:
         return ProbeResult(ok=False, probe=PROBE_HOTPKG, target=target,
-                           detail="连接失败：%s" % e, elapsed_ms=_ms(t0),
+                           detail="连接失败：%s" % e, elapsed_ms=elapsed_ms(t0),
                            severity=Severity.P1, suppress_key=manifest_key(mirror))
     if res.status != 200:
         return ProbeResult(ok=False, probe=PROBE_HOTPKG, target=target,
                            detail="HTTP %d（期望 200）" % res.status,
                            elapsed_ms=res.elapsed_ms, severity=Severity.P1,
                            suppress_key=manifest_key(mirror))
+    if res.overflow:
+        return ProbeResult(
+            ok=False, probe=PROBE_HOTPKG, target=target,
+            detail="包比版本文件声称的大：说好 %d 字节，下到 %d 还没完，已中断"
+                   % (meta.size, res.size),
+            elapsed_ms=res.elapsed_ms, severity=Severity.P1,
+            suppress_key=manifest_key(mirror))
     if res.size != meta.size:
         return ProbeResult(
             ok=False, probe=PROBE_HOTPKG, target=target,
@@ -494,6 +547,3 @@ async def _default_not_after(host: str, port: int) -> Optional[float]:
 
     return await asyncio.get_running_loop().run_in_executor(None, _handshake)
 
-
-def _ms(t0: float) -> int:
-    return int((time.monotonic() - t0) * 1000)

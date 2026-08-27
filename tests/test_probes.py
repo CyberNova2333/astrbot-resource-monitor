@@ -163,3 +163,38 @@ class CertTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OversizedPackageTest(unittest.TestCase):
+    def test_stream_is_capped(self):
+        """一条被劫持或坏掉的线路可以一直往我们这边灌数据。内存不涨（流式），
+        但带宽和时间无上限——监控自己成了那条线路的长期负载。"""
+        from watch.models import VersionMeta
+        meta = VersionMeta(version=1, size=64, md5="a" * 32)
+        client = FakeClient().digest_result(MIRROR.url_for("big.zip"), b"z" * (4 << 20))
+        result = run(probes.probe_hot_package(client, MIRROR, "big.zip", meta))
+        self.assertFalse(result.ok)
+        self.assertIn("已中断", result.detail)
+
+
+class MirrorTargetTest(unittest.TestCase):
+    """线路表来自配置源，而配置源是远端内容——它不该能指挥监控去敲内网。"""
+
+    def _disc(self, *bases):
+        from watch.sources import Discovered
+        return Discovered(mirrors=[Mirror(name=b, base=b) for b in bases])
+
+    def test_loopback_and_private_are_refused(self):
+        ok, bad = probes.check_mirror_targets(self._disc(
+            "http://127.0.0.1:8080/", "http://10.1.2.3/", "http://localhost/",
+            "https://a.example.test/"))
+        self.assertEqual([m.base for m in ok], ["https://a.example.test/"])
+        self.assertEqual(len(bad), 3)
+        self.assertTrue(all(not r.ok for r in bad))
+
+    def test_domain_names_are_not_resolved(self):
+        """只认字面量地址：做 DNS 解析要么慢要么会被绕过，而且会误伤 CDN 域名。
+        宁可漏一个用域名伪装的，也不要拦下正常线路。"""
+        ok, bad = probes.check_mirror_targets(self._disc("https://cdn.example.test/"))
+        self.assertEqual(len(ok), 1)
+        self.assertEqual(bad, [])

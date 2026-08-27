@@ -163,12 +163,17 @@ class EndpointSource(Source):
         settings = {k: v for k, v in cfg.settings.items()
                     if isinstance(v, (int, float)) and not isinstance(v, bool)}
         proxy = cfg.raw.get("proxy")
+        version_files = discovery.declared_version_files(cfg)
+        packages = {}
+        for name in version_files:
+            package = discovery.declared_package_for(cfg, name)
+            if package:
+                packages[name] = package
         return Discovered(
             mirrors=cfg.mirrors,
             settings=settings,
-            version_files=discovery.declared_version_files(cfg),
-            packages={n: p for n in discovery.declared_version_files(cfg)
-                      for p in [discovery.declared_package_for(cfg, n)] if p},
+            version_files=version_files,
+            packages=packages,
             client_version=(str(cfg.client.get("version")).strip()
                             if cfg.client.get("version") else None),
             proxy_base=(str(proxy.get("base")) if isinstance(proxy, dict)
@@ -207,14 +212,14 @@ class EndpointSource(Source):
             try:
                 cfg, _ = await discovery.fetch_online_config(client, url)
             except discovery.ContentError as e:
-                lines.append("备用出口 %s：内容同样是坏的（%s）" % (_host(url), e))
+                lines.append("备用出口 %s：内容同样是坏的（%s）" % (host_of(url), e))
                 continue
             except discovery.DiscoveryError as e:
-                lines.append("备用出口 %s：也拉不到（%s）" % (_host(url), e))
+                lines.append("备用出口 %s：也拉不到（%s）" % (host_of(url), e))
                 continue
             got = got or cfg
             lines.append("备用出口 %s：正常，%d 条线路（%d 启用）"
-                         % (_host(url), len(cfg.mirrors), len(cfg.enabled_mirrors)))
+                         % (host_of(url), len(cfg.mirrors), len(cfg.enabled_mirrors)))
         if got is not None:
             lines.append("→ 文档内容本身是好的，坏的是主入口那个出口")
         elif lines:
@@ -284,7 +289,8 @@ def build(spec: dict) -> Source:
     raise ValueError("不认识的配置源类型：%r（可用：endpoint / mirrors）" % kind)
 
 
-def _host(url: str) -> str:
+def host_of(url: str) -> str:
+    """取主机名。取不到就原样返回——这个值只用来给人看。"""
     from urllib.parse import urlparse
     try:
         return urlparse(url).hostname or url

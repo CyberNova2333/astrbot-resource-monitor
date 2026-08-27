@@ -163,5 +163,41 @@
         "default": 86400
       }
     }
+  },
+  "command": {
+    "description": "命令闸门",
+    "type": "object",
+    "items": {
+      "respond_anywhere": {
+        "description": "在任何会话里都响应命令",
+        "type": "bool",
+        "hint": "默认关：只在上面配置的通知会话里响应。bot 常常同时在很多群里，别的群没理由看到线路地址与阈值。",
+        "default": false
+      },
+      "allow_sessions": {
+        "description": "额外允许的会话",
+        "type": "list",
+        "hint": "除通知会话之外，还允许哪些会话发命令。",
+        "default": []
+      },
+      "heavy_admin_only": {
+        "description": "会打真实流量的命令限管理员",
+        "type": "bool",
+        "hint": "指 /线路 测 与 /线路 配置——它们会真的去拉线上线路。关掉的话，一条复读机消息就是一台流量放大器。",
+        "default": true
+      },
+      "privileged_admin_only": {
+        "description": "静音类命令限管理员",
+        "type": "bool",
+        "hint": "静音会把所有告警关掉，而关掉之后没有任何人会知道。",
+        "default": true
+      },
+      "cooldown_seconds": {
+        "description": "重命令的最小间隔（秒）",
+        "type": "int",
+        "hint": "拦的不是恶意，是复读：群里两个人同时想起来要测一下，就会连开两轮。",
+        "default": 60
+      }
+    }
   }
 }

@@ -35,13 +35,12 @@ class ConfigParseTest(unittest.TestCase):
         ]}).encode())
         self.assertEqual([m.name for m in cfg.mirrors], ["甲"])
 
-    def test_thresholds_return_none_when_absent(self):
-        """线上没给就是没给——**不返回兜底值**（铁律 2）。"""
-        cfg = parse_online_config(json.dumps({"mirrors": [], "settings": {}}).encode())
-        self.assertIsNone(cfg.threshold("min_speed_kbps"))
+    def test_settings_are_passed_through_verbatim(self):
+        """阈值原样带出来，判据层再决定用不用（取不到就保持未判定，
+        不拿兜底值——铁律 2）。取阈值只有 Discovered 一个入口。"""
         cfg = parse_online_config(json.dumps(
             {"mirrors": [], "settings": {"min_speed_kbps": 1200}}).encode())
-        self.assertEqual(cfg.threshold("min_speed_kbps"), 1200.0)
+        self.assertEqual(cfg.settings["min_speed_kbps"], 1200)
 
     def test_watch_declaration_is_optional(self):
         """被监控方没声明要探什么，就不探——不知道时保持沉默。"""

@@ -68,6 +68,7 @@ class DigestResult:
     size: int = 0
     md5: str = ""
     elapsed_ms: int = 0
+    overflow: bool = False        # 撞到字节上限，提前停了
 
     def __post_init__(self):
         object.__setattr__(self, "headers", _lower(self.headers))
@@ -84,7 +85,8 @@ class HttpClient:
         raise NotImplementedError
 
     async def digest(self, url: str, *,
-                     headers: Optional[Mapping[str, str]] = None) -> DigestResult:
+                     headers: Optional[Mapping[str, str]] = None,
+                     max_bytes: Optional[int] = None) -> DigestResult:
         raise NotImplementedError
 
 
@@ -101,7 +103,8 @@ class AiohttpClient(HttpClient):
     """
 
     def __init__(self, user_agent: str, timeout_seconds: float = 30.0,
-                 max_body_bytes: int = 4 * 1024 * 1024):
+                 max_body_bytes: int = 4 * 1024 * 1024,
+                 stream_timeout_seconds: float = 1800.0):
         try:
             import aiohttp                                    # noqa: F401
         except ImportError as e:                              # pragma: no cover
@@ -111,6 +114,9 @@ class AiohttpClient(HttpClient):
         self._aiohttp = __import__("aiohttp")
         self._ua = user_agent
         self._timeout = timeout_seconds
+        # 整包核对是几百 MB，用小响应那个超时必然拉不完——那会把「包很大」
+        # 误报成「线路坏了」，而误报的监控没几天就没人看了。
+        self._stream_timeout = max(timeout_seconds, stream_timeout_seconds)
         self._max_body = max_body_bytes
         self._session = None
 
@@ -118,7 +124,11 @@ class AiohttpClient(HttpClient):
         if self._session is None or self._session.closed:
             aiohttp = self._aiohttp
             self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=self._timeout),
+                # 会话级只设连接与首字节超时；整体时长按请求给（小响应 30s、
+                # 整包核对半小时），否则两者只能二选一。
+                timeout=aiohttp.ClientTimeout(total=None,
+                                              connect=self._timeout,
+                                              sock_read=self._timeout),
                 headers={"User-Agent": self._ua,
                          "Accept-Encoding": "identity"},
                 auto_decompress=False,
@@ -135,7 +145,9 @@ class AiohttpClient(HttpClient):
         cap = max_bytes or self._max_body
         t0 = time.monotonic()
         try:
-            async with session.get(url, headers=dict(headers or {})) as resp:
+            async with session.get(
+                    url, headers=dict(headers or {}),
+                    timeout=self._aiohttp.ClientTimeout(total=self._timeout)) as resp:
                 buf = bytearray()
                 truncated = False
                 async for chunk in resp.content.iter_chunked(64 * 1024):
@@ -150,24 +162,45 @@ class AiohttpClient(HttpClient):
         except Exception as e:
             raise HttpError(_why(e, self._timeout)) from e
 
-    async def digest(self, url, *, headers=None) -> DigestResult:
+    async def digest(self, url, *, headers=None, max_bytes=None) -> DigestResult:
+        """边下边算 MD5，不进内存。
+
+        **一定要有字节上限。** 没有上限的话，一条被劫持或坏掉的线路可以一直
+        往我们这边灌数据：内存不涨（是流式的），但带宽和时间无上限——监控自己
+        变成了那条线路的长期负载。上限由调用方按「版本文件声明的大小」给，
+        超了直接判失败：本来就说明这个包不是它声称的那个。
+        """
         session = await self._ensure()
+        cap = max_bytes if max_bytes and max_bytes > 0 else None
         t0 = time.monotonic()
         try:
-            async with session.get(url, headers=dict(headers or {})) as resp:
+            async with session.get(
+                    url, headers=dict(headers or {}),
+                    timeout=self._aiohttp.ClientTimeout(
+                        total=self._stream_timeout, connect=self._timeout,
+                        sock_read=self._timeout)) as resp:
                 md = hashlib.md5()
                 size = 0
+                overflow = False
                 async for chunk in resp.content.iter_chunked(1 << 20):
                     md.update(chunk)
                     size += len(chunk)
+                    if cap is not None and size > cap:
+                        overflow = True
+                        break
                 return DigestResult(status=resp.status, headers=_lower(resp.headers),
-                                    size=size, md5=md.hexdigest(), elapsed_ms=_ms(t0))
+                                    size=size, md5=md.hexdigest(), elapsed_ms=_ms(t0),
+                                    overflow=overflow)
         except Exception as e:
-            raise HttpError(_why(e, self._timeout)) from e
+            raise HttpError(_why(e, self._stream_timeout)) from e
 
 
-def _ms(t0: float) -> int:
+def elapsed_ms(t0: float) -> int:
+    """`time.monotonic()` 起点到现在的毫秒数。计时只有这一份实现。"""
     return int((time.monotonic() - t0) * 1000)
+
+
+_ms = elapsed_ms          # 模块内部沿用短名
 
 
 def _why(exc: Exception, timeout: float) -> str:

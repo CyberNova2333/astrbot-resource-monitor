@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 import unicodedata
 from typing import Dict, Iterable, List, Optional, Sequence
@@ -40,6 +41,52 @@ IMPACT = {
     PROBE_SPEED: "低于客户端判停滞的速度，用户会不停换线",
     PROBE_TLS: "证书过期后这条线路直接不可用",
 }
+
+
+# ── 出群前的净化 ────────────────────────────────────────────────────
+#
+# 告警里有大量**不是我们写的字符串**：线路名与阈值来自配置源，文件名来自线路上
+# 的清单，错误文本来自对面的服务器。这些地方任何一处被改坏或被劫持，我们就会
+# 原样把它念进群里。三种后果，从轻到重：
+#
+#   · 平台控制序列被适配器解析——QQ 的 [CQ:at,qq=all] 写在纯文本里也可能生效，
+#     等于让一条线路的名字替我们 @ 全体；
+#   · **伪造告警**：一个叫「线路甲 正常\n\n🔴 P0 · 全部线路失败」的线路名，
+#     在群里看起来就是一条我们发的 P0；
+#   · 刷屏：一个 50 KB 的错误文本能把群顶掉。
+#
+# 判据是「**出群那一刻**净化」而不是入口处：探针内部要拿原样的值去比对（截断过
+# 的哈希就没法比了），而状态机的键也必须稳定。所以只有这一层做净化。
+CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+INVISIBLE = re.compile(r"[\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]")
+AT_ALL = re.compile(r"@(全体成员|everyone|all)", re.I)
+PLATFORM_CODE = re.compile(r"\[(CQ|at|mirai|face|json|xml):", re.I)
+
+MAX_FIELD = 160          # 单个字段（线路名、一句说明）
+MAX_MESSAGE = 3000       # 整条消息——再长的告警没人读，只会把群顶掉
+
+
+def safe(text, limit: int = MAX_FIELD) -> str:
+    """把一段**不是我们写的**文字弄成可以安全念进群里的样子。
+
+    换行一并拿掉：多行才伪造得出「另一条告警」的样子，而这些字段本来就该是一行。
+    """
+    out = str(text if text is not None else "")
+    out = CONTROL.sub(" ", out).replace("\n", " ").replace("\r", " ")
+    out = INVISIBLE.sub("", out)
+    out = PLATFORM_CODE.sub(lambda m: "［" + m.group(1) + "：", out)
+    out = AT_ALL.sub("＠\\1", out)
+    out = re.sub(r"\s{2,}", " ", out).strip()
+    if len(out) > limit:
+        out = out[:limit] + "…"
+    return out
+
+
+def clamp(message: str, limit: int = MAX_MESSAGE) -> str:
+    """整条消息的长度闸。截断时说一声，别让人以为消息就这么多。"""
+    if len(message) <= limit:
+        return message
+    return message[:limit] + "\n…（后面还有，太长了没发全）"
 
 
 def _width(text: str) -> int:
@@ -110,17 +157,21 @@ def render_group(group: Sequence[Notification], *, enabled_mirrors: int = 0,
     tag = ("【%s】" % prefix) if prefix else ""
 
     if head.kind == "recover":
-        lines = ["%s %s · %s%s 恢复" % (Severity.INFO.emoji, Severity.INFO.value, tag, probe)]
+        lines = ["%s %s · %s%s 恢复"
+                 % (Severity.INFO.emoji, Severity.INFO.value, tag, safe(probe, 40))]
         for n in group:
-            lines.append("  %s  %s" % (n.result.target, n.result.detail))
+            lines.append("  %s  %s" % (safe(n.result.target), safe(n.result.detail, 300)))
             if n.duration_seconds:
                 lines.append("  故障持续了 %s（%s 起）"
                              % (human_duration(n.duration_seconds), _clock(n.since)))
-        return "\n".join(lines)
+        return clamp("\n".join(lines))
 
+    # 标题里的目标名同样要净化：它来自配置源/清单，是最容易被拿来伪造
+    # 「另一条告警」的位置——标题在最上面，看起来最像真的。
     title_scope = ("全部 %d 条线路" % enabled_mirrors
                    if enabled_mirrors and len(group) >= enabled_mirrors > 1
-                   else ("%d 个目标" % len(group) if len(group) > 1 else group[0].result.target))
+                   else ("%d 个目标" % len(group) if len(group) > 1
+                         else safe(group[0].result.target, 60)))
     verb = "仍在失败" if head.kind == "remind" else "失败"
     # 目标名已经包含在探针名里时不要重复（「线上配置 线上配置可达性 失败」）。
     if title_scope and title_scope in probe:
@@ -128,7 +179,7 @@ def render_group(group: Sequence[Notification], *, enabled_mirrors: int = 0,
     lines = ["%s %s · %s%s%s %s" % (sev.emoji, sev.value, tag, title_scope,
                                     (" " if title_scope else "") + probe, verb)]
     lines.append("")
-    lines.append("  探针：%s" % probe)
+    lines.append("  探针：%s" % safe(probe, 40))
     if IMPACT.get(probe):
         lines.append("  影响：%s" % IMPACT[probe])
     if head.since:
@@ -138,9 +189,10 @@ def render_group(group: Sequence[Notification], *, enabled_mirrors: int = 0,
                      "  已持续：%s（首次失败 %s）"
                      % (human_duration(head.duration_seconds), _clock(head.since)))
     lines.append("")
-    width = max((_width(n.result.target) for n in group), default=0)
-    for n in group:
-        lines.append("  %s  %s" % (_pad(n.result.target, width), n.result.detail))
+    targets = [safe(n.result.target) for n in group]
+    width = max((_width(t) for t in targets), default=0)
+    for target, n in zip(targets, group):
+        lines.append("  %s  %s" % (_pad(target, width), safe(n.result.detail, 300)))
     if upstream_line:
         lines.append("")
         lines.append("  %s" % upstream_line)
@@ -149,11 +201,13 @@ def render_group(group: Sequence[Notification], *, enabled_mirrors: int = 0,
     if extra_lines:
         lines.append("")
         for extra in extra_lines:
-            lines.append("  %s" % extra)
-    if at_all and sev == Severity.P0:
+            lines.append("  %s" % safe(extra, 300))
+    # 只有**首次报**才 @ 全体：持续故障每 6 小时提醒一次，那几条再 @ 一遍
+    # 全体，收到的人只会把这个 bot 屏蔽掉。
+    if at_all and sev == Severity.P0 and head.kind == "fire":
         lines.append("")
         lines.append("@全体成员")
-    return "\n".join(lines)
+    return clamp("\n".join(lines))
 
 
 def upstream_line(entry_ok: bool, entry_detail: str, entry_at: float = 0.0) -> str:
@@ -163,10 +217,11 @@ def upstream_line(entry_ok: bool, entry_detail: str, entry_at: float = 0.0) -> s
     没省事。这一行就是替他先查了那一步。
     """
     if entry_ok:
-        return ("上游线上配置：正常（%s 拉取成功，%s）\n  → 排除配置问题，"
-                "像是回源侧故障" % (_clock(entry_at) if entry_at else "本轮", entry_detail))
-    return ("上游线上配置：**同样失败**（%s）\n  → 先看入口，下游这些多半是"
-            "它的连带结果" % entry_detail)
+        return ("上游配置源：正常（%s 拉取成功，%s）\n  → 排除配置问题，"
+                "像是回源侧故障"
+                % (_clock(entry_at) if entry_at else "本轮", safe(entry_detail, 200)))
+    return ("上游配置源：**同样失败**（%s）\n  → 先看它，下游这些多半是"
+            "它的连带结果" % safe(entry_detail, 200))
 
 
 def render_status(results: Sequence[ProbeResult], *, muted_until: float = 0.0,
@@ -189,13 +244,13 @@ def render_status(results: Sequence[ProbeResult], *, muted_until: float = 0.0,
     lines.append("")
     for r in results:
         mark = "✅" if r.ok and not r.unknown else ("⚪" if r.unknown else "❌")
-        lines.append("%s %s · %s" % (mark, r.probe, r.target))
-        lines.append("    %s" % r.detail)
+        lines.append("%s %s · %s" % (mark, safe(r.probe, 40), safe(r.target)))
+        lines.append("    %s" % safe(r.detail, 300))
     if coverage is not None and coverage.total:
         lines.append("")
         lines.append("块校验覆盖率：%.1f%%（%d/%d 块，7 天窗口）"
                      % (coverage.percent, coverage.verified, coverage.total))
-    return "\n".join(lines)
+    return clamp("\n".join(lines))
 
 
 def render_coverage(coverage: CoverageReport, window_days: float = 7.0) -> str:
@@ -228,7 +283,7 @@ def render_online_config(disc, extra_lines: Optional[Iterable[str]] = None) -> s
     lines.append("  线路：%d 条，%d 条启用" % (len(disc.mirrors), len(disc.enabled_mirrors)))
     for m in disc.mirrors:
         lines.append("    %s %s（weight=%s chunks=%s）"
-                     % ("✅" if m.enabled else "⛔", m.name, m.weight, m.chunks))
+                     % ("✅" if m.enabled else "⛔", safe(m.name), m.weight, m.chunks))
     known = [("换线失败阈值", "switch_after_failures"), ("停滞秒数", "stall_seconds"),
              ("最低速率 kbps", "min_speed_kbps"), ("冷却毫秒", "cooldown_ms")]
     shown = [(label, disc.threshold(key)) for label, key in known]
@@ -241,7 +296,8 @@ def render_online_config(disc, extra_lines: Optional[Iterable[str]] = None) -> s
         lines.append("  这个源没给阈值——速率一类的判据保持未判定"
                      "（不拿写死的默认值凑数）")
     if disc.version_files:
-        lines.append("  热更探针：%s" % "、".join(disc.version_files))
+        lines.append("  热更探针：%s"
+                     % "、".join(safe(n, 60) for n in disc.version_files))
     for extra in extra_lines or []:
-        lines.append("  %s" % extra)
-    return "\n".join(lines)
+        lines.append("  %s" % safe(extra, 300))
+    return clamp("\n".join(lines))
