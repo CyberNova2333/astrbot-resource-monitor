@@ -77,13 +77,22 @@ FORBIDDEN_TRACKED = ("config.toml", "config.json", "config.yaml", "config.yml",
                      ".env", "conf/config.toml", "conf/config.json")
 
 URL = re.compile(r"\bhttps?://([^\s/\"'`)\]}>,;]+)", re.I)
-# 裸主机名：至少两段 + 已知 TLD。后缀表刻意短——只放**真会被写进来**的那些，
-# 宁可漏一个陌生 TLD，也不要把 `astrbot.api.star`、`config.json` 这种模块名
-# 和文件名当成主机拦下来。
+# 裸主机名：至少两段 + 已知 TLD。三处刻意收紧，都是被误伤换来的：
+#
+#   · 后缀表只放**真会被写进来**的那些——宁可漏一个陌生 TLD，也不要把
+#     `astrbot.api.star`、`config.json` 这种模块名和文件名当成主机；
+#   · **区分大小写**（不加 re.I）：源码里的主机名一律小写，而 `Severity.INFO`
+#     这种常量会被大小写不敏感的版本当成 `.info` 域名拦下来；
+#   · 后面紧跟 `(` 的不算：那是方法调用（`logger.info(...)`），不是地址。
+#     `info` 同时从后缀表里去掉了——它与 Python 里最常见的属性名撞车，
+#     留着它的收益远小于误伤。
+#
+# 一个会拦下正常代码的检查比没有检查更糟：被误伤过一次的人，下次就会习惯性
+# 加 SKIP_ENDPOINT_HOOK=1，那时守卫就等于不存在。
 BARE_HOST = re.compile(
     r"(?<![\w.@/-])((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+"
-    r"(?:com|net|org|io|dev|app|top|cn|xyz|site|club|me|info|tv|test|invalid))"
-    r"(?![\w-])", re.I)
+    r"(?:com|net|org|io|dev|app|top|cn|xyz|site|club|tv|test|invalid))"
+    r"(?![\w-]|\()")
 EMAIL = re.compile(r"[\w.+-]+@([\w.-]+\.[a-z]{2,})", re.I)
 # 凭证形状：这几种一眼可辨，不会误伤
 SECRETS = (

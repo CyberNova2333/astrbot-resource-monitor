@@ -1,0 +1,6 @@
+# 运行期依赖只有 aiohttp，而它在 AstrBot 的环境里本来就有——写在这里是为了
+# 「独立跑判据层」时也能装起来。
+#
+# 判据层的测试**不需要任何第三方包**：探针只认 watch/http.py 里的协议，
+# 测试喂一个假实现。跑测试请用 python3 -m unittest discover -s tests。
+aiohttp>=3.8

@@ -31,16 +31,10 @@ jobs:
       - name: 🔒 地址守卫（铁律 1：地址/凭证不入库）
         run: python3 tools/check-no-endpoints.py --verbose
 
+      # 判据层测试刻意**不装任何第三方包**：探针只认 watch/http.py 里的协议，
+      # 测试喂假实现。装依赖跑测试等于让 CI 的绿灯依赖 PyPI 当天的心情。
       - name: 🧪 判据层测试（离线，不打真线路）
-        run: |
-          if [ -d tests ]; then
-            python3 -m pip install --quiet pytest
-            # 依赖表还不存在时也别红：判据层测试刻意不依赖网络与框架
-            [ -f requirements-dev.txt ] && python3 -m pip install --quiet -r requirements-dev.txt
-            python3 -m pytest -q
-          else
-            echo "还没有 tests/，跳过（判据层落地时补上）"
-          fi
+        run: python3 -m unittest discover -s tests -t . -v
 
       - name: 🧮 语法
-        run: python3 -m compileall -q tools $(ls -d watch main.py 2>/dev/null || true)
+        run: python3 -m compileall -q tools watch main.py
