@@ -187,3 +187,94 @@ class PersistenceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EntryDownDiagnosisTest(unittest.TestCase):
+    """入口挂了正是最需要信息的时刻——那条 P0 要能替人把第一步查掉。"""
+
+    def _monitor_with_known_good(self):
+        m = Monitor(cfg(), healthy_client())
+        run(m.run_cycle(now=1000))          # 先拿到一份好配置
+        return m
+
+    def test_stale_mirror_table_answers_how_bad_it_is(self):
+        m = self._monitor_with_known_good()
+        broken = FakeClient().fail(ENTRY_URL, "连接超时（30s 未完成）")
+        for base in (A, B):
+            broken.json(base + "manifest.json", MANIFEST)
+        m.client = broken
+        out = run(m.run_cycle(now=1300))
+        msg = out.messages[0]
+        self.assertIn("🔴 P0", msg)
+        self.assertIn("旧线路表", msg)
+        self.assertIn("2/2 条线路", msg)
+        self.assertIn("客户端此刻靠内置线路还能撑", msg)
+
+    def test_says_when_mirrors_are_down_too(self):
+        m = self._monitor_with_known_good()
+        broken = FakeClient().fail(ENTRY_URL)
+        for base in (A, B):
+            broken.raw(base + "manifest.json", b"", status=502)
+        m.client = broken
+        out = run(m.run_cycle(now=1300))
+        self.assertIn("用户现在多半真的装不上", out.messages[0])
+
+    def test_stale_probes_never_alert(self):
+        """用旧线路表探出来的只是线索：不进状态机，也不触发告警。"""
+        m = self._monitor_with_known_good()
+        broken = FakeClient().fail(ENTRY_URL)
+        for base in (A, B):
+            broken.raw(base + "manifest.json", b"", status=502)
+        m.client = broken
+        out = run(m.run_cycle(now=1300))
+        self.assertEqual(len(out.messages), 1, "只该有入口那一条 P0")
+        stale = [r for r in out.results if "旧线路表" in r.detail]
+        self.assertTrue(stale and all(r.unknown for r in stale))
+
+    def test_expired_snapshot_is_not_used(self):
+        """一天前的线路表说明不了现在——说不出来比说错强。"""
+        m = self._monitor_with_known_good()
+        m.client = FakeClient().fail(ENTRY_URL)
+        out = run(m.run_cycle(now=1000 + 40 * 3600))
+        self.assertIn("太旧了不拿它探", out.messages[0])
+
+    def test_backup_entry_separates_bad_content_from_dead_host(self):
+        backup = "https://backup.example.test/config.json"
+        local = cfg(entry_urls=[backup])
+        client = healthy_client().json(backup, ONLINE_CONFIG)
+        client.fail(ENTRY_URL, "连接超时（30s 未完成）")
+        m = Monitor(local, client)
+        out = run(m.run_cycle(now=1000))
+        msg = out.messages[0]
+        self.assertIn("备用入口", msg)
+        self.assertIn("配置内容本身是好的", msg)
+
+    def test_broken_json_is_reported_as_content_not_reachability(self):
+        client = healthy_client().raw(ENTRY_URL, b"{ half", status=200)
+        m = Monitor(cfg(), client)
+        out = run(m.run_cycle(now=1000))
+        self.assertIn("内容坏了", out.messages[0])
+        entry = out.results[0]
+        self.assertEqual(entry.extra.get("reason"), "content")
+
+
+class ConfigMutationTest(unittest.TestCase):
+    def test_mirror_table_halved_is_p0(self):
+        m = Monitor(cfg(), healthy_client())
+        run(m.run_cycle(now=1000))
+        shrunk = dict(ONLINE_CONFIG)
+        shrunk["mirrors"] = [dict(ONLINE_CONFIG["mirrors"][0]),
+                             dict(ONLINE_CONFIG["mirrors"][1], enabled=False)]
+        m.client = healthy_client().json(ENTRY_URL, shrunk)
+        out = run(m.run_cycle(now=2000))
+        joined = "\n".join(out.messages)
+        self.assertIn("线路表突变", joined)
+        self.assertIn("🔴 P0", joined)
+
+    def test_settings_section_vanishing_is_flagged(self):
+        m = Monitor(cfg(), healthy_client())
+        run(m.run_cycle(now=1000))
+        stripped = {k: v for k, v in ONLINE_CONFIG.items() if k != "settings"}
+        m.client = healthy_client().json(ENTRY_URL, stripped)
+        out = run(m.run_cycle(now=2000))
+        self.assertIn("阈值段消失", "\n".join(out.messages))

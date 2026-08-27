@@ -46,13 +46,22 @@ class DiscoveryError(Exception):
     """拿不到/看不懂线上配置。这本身就是 P0：客户端此时会静默回退，用户无感。"""
 
 
+class ContentError(DiscoveryError):
+    """**拉到了，但内容是坏的**（JSON 解析不了、结构不对、一条线路都没有）。
+
+    与「拉不到」分开，是因为处置方式完全不同：内容坏了是人改坏的，要回滚；
+    拉不到是出口/托管的问题，要找那边。糊成一条 P0 的话，收到的人第一步还是
+    得自己去分辨——那正是告警该替他做的事。
+    """
+
+
 def parse_online_config(body: bytes) -> OnlineConfig:
     try:
         raw = json.loads(body.decode("utf-8", errors="replace"))
     except ValueError as e:
-        raise DiscoveryError("线上配置不是合法 JSON：%s" % e)
+        raise ContentError("线上配置不是合法 JSON：%s" % e)
     if not isinstance(raw, dict):
-        raise DiscoveryError("线上配置的顶层不是对象")
+        raise ContentError("线上配置的顶层不是对象")
 
     mirrors: List[Mirror] = []
     for item in raw.get("mirrors") or []:
@@ -80,14 +89,16 @@ async def fetch_online_config(client: HttpClient, entry_url: str) -> Tuple[Onlin
     try:
         resp = await client.fetch(entry_url, headers=NO_CACHE)
     except HttpError as e:
-        raise DiscoveryError("入口不可达：%s" % e)
+        # 不在这里加「入口不可达」前缀：调用方已经按「拉不到 / 内容坏了」
+        # 分好类了，两层前缀叠起来是「拉不到：入口不可达：连接超时」。
+        raise DiscoveryError(str(e))
     if resp.status != 200:
         raise DiscoveryError("入口返回 HTTP %d（期望 200）" % resp.status)
     if resp.truncated:
-        raise DiscoveryError("入口响应超过上限，没读完——这不像是一份配置")
+        raise ContentError("入口响应超过上限，没读完——这不像是一份配置")
     cfg = parse_online_config(resp.body)
     if not cfg.mirrors:
-        raise DiscoveryError("线上配置里没有任何可用的 mirrors 条目")
+        raise ContentError("线上配置里没有任何可用的 mirrors 条目")
     return cfg, resp
 
 
