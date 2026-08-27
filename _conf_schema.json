@@ -1,0 +1,131 @@
+{
+  "entry_url": {
+    "description": "线上配置入口地址",
+    "type": "string",
+    "hint": "整条链的入口，形如 https://api.example.test/path/to/config.json 。线路表、文件清单、阈值都从它后面自发现，插件里不留第二份。这个值不入库，只在这里填。",
+    "default": ""
+  },
+  "notify": {
+    "description": "通知",
+    "type": "object",
+    "items": {
+      "sessions": {
+        "description": "推送到哪些会话",
+        "type": "list",
+        "hint": "AstrBot 的会话 ID（群/私聊）。填错不会报错，只会没人收到告警——填完用 /线路 状态 验一下。",
+        "default": []
+      },
+      "at_all_on_p0": {
+        "description": "P0 时 @全体",
+        "type": "bool",
+        "hint": "P0 = 全部线路的同一环节都挂了，用户现在装不上。只有这一档 @ 全体；其余级别不 @，否则两周后就没人看群了。",
+        "default": true
+      },
+      "prefix": {
+        "description": "实例前缀",
+        "type": "string",
+        "hint": "多地部署时给每个实例一个前缀（如「境内」），否则两边的告警在群里分不出是谁报的。",
+        "default": ""
+      }
+    }
+  },
+  "schedule": {
+    "description": "探测节奏",
+    "type": "object",
+    "items": {
+      "interval_fast_seconds": {
+        "description": "快周期（秒）",
+        "type": "int",
+        "hint": "P0 那几个探针的间隔：入口、清单、抽样块。挂了要几分钟内知道。",
+        "default": 300
+      },
+      "interval_slow_seconds": {
+        "description": "慢周期（秒）",
+        "type": "int",
+        "hint": "版本 json、证书这些小时级就够的。",
+        "default": 3600
+      },
+      "chunk_probes_per_cycle": {
+        "description": "每轮验几个块",
+        "type": "int",
+        "hint": "抽样块校验：每轮取几块比 MD5，逐块轮换线路。1 就够——几天下来全站每个字节都会被滚着验一遍。调大等比例增加流量。",
+        "default": 1
+      },
+      "hot_package_on_version_change": {
+        "description": "热更包：版本变了就整包核对",
+        "type": "bool",
+        "hint": "包是数百 MB 量级，按轮跑等于把带宽烧在一件几天才变一次的事上；而坏包恰恰只在刚换过的时候出现。",
+        "default": true
+      },
+      "hot_package_min_interval_seconds": {
+        "description": "热更包整包核对的最小间隔（秒）",
+        "type": "int",
+        "hint": "兜底：版本一直没变也隔这么久查一次——「一直没变」也可能是这条线路的缓存把新包挡住了。",
+        "default": 21600
+      }
+    }
+  },
+  "alert": {
+    "description": "告警",
+    "type": "object",
+    "items": {
+      "fire_after_failures": {
+        "description": "连续坏几轮才报",
+        "type": "int",
+        "hint": "与下面的窗口配成「N 轮里坏 M 轮」。网络抖动是常态，一次超时就 @ 全体，两天后没人看群。",
+        "default": 2
+      },
+      "fire_window": {
+        "description": "判定窗口（轮）",
+        "type": "int",
+        "default": 3
+      },
+      "recover_after_successes": {
+        "description": "连续好几轮算恢复",
+        "type": "int",
+        "hint": "恢复也要报——不发恢复通知的监控，人会一直以为还坏着。",
+        "default": 2
+      },
+      "remind_every_hours": {
+        "description": "持续故障的提醒间隔（小时）",
+        "type": "float",
+        "hint": "同一故障只报一次，之后每隔这么久提醒一次「还在坏」，不是每轮都刷。",
+        "default": 6
+      },
+      "mute_command_admin_only": {
+        "description": "/线路 静音 限管理员",
+        "type": "bool",
+        "hint": "关掉的话群友也能静音，而静音之后没有任何人会知道告警被关了。",
+        "default": true
+      }
+    }
+  },
+  "runtime": {
+    "description": "运行期",
+    "type": "object",
+    "items": {
+      "user_agent": {
+        "description": "User-Agent",
+        "type": "string",
+        "hint": "刻意与客户端不同：混在一起以后就没法把监控流量从访问日志里摘出去。",
+        "default": "resource-watch/1.0"
+      },
+      "state_dir": {
+        "description": "状态目录",
+        "type": "string",
+        "hint": "故障状态机落盘的地方。不落盘的话 bot 一重启就会把所有故障当成新故障重报一遍。",
+        "default": "data"
+      },
+      "http_timeout_seconds": {
+        "description": "HTTP 超时（秒）",
+        "type": "float",
+        "default": 30
+      },
+      "max_body_bytes": {
+        "description": "配置/清单类响应的大小上限（字节）",
+        "type": "int",
+        "default": 4194304
+      }
+    }
+  }
+}

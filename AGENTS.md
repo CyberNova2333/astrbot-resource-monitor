@@ -198,8 +198,8 @@ Co-authored-by: Claude <noreply@anthropic.com>
 ```bash
 python3 tools/check-no-endpoints.py       # 铁律 1：地址/凭证不入库
 python3 tools/check-branch-hygiene.py     # §0：远端分支体检
-python3 -m pytest -q                      # 判据层测试（离线，喂假响应）
-python3 -m compileall -q watch main.py    # 语法（没装 pytest 时至少跑这个）
+python3 -m unittest discover -s tests -t .   # 判据层测试（离线，喂假响应）
+python3 -m compileall -q watch main.py       # 语法
 ```
 
 判据层测试**不联网**。要验一个探针，喂它一份假响应，而不是去打真线路——
