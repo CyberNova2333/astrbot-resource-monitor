@@ -1,0 +1,46 @@
+name: ✅ 检查
+
+# ╔════════════════════════════════════════════════════════════════════╗
+# ║  只做检查，不发布、不部署、不改仓库内容（CONTRIBUTING.md §五）。     ║
+# ║                                                                    ║
+# ║  地址守卫在 pre-push 钩子里已经拦过一道，这里再跑一次——钩子只管得住 ║
+# ║  装了钩子的克隆，而「在别处提交再推进来」正是它挡不住的形状。       ║
+# ╚════════════════════════════════════════════════════════════════════╝
+
+on:
+  push:
+    branches: [main, 'hotfix/**', 'surgery/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📦 检出
+        uses: actions/checkout@v4
+
+      - name: 🐍 装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 🔒 地址守卫（铁律 1：地址/凭证不入库）
+        run: python3 tools/check-no-endpoints.py --verbose
+
+      - name: 🧪 判据层测试（离线，不打真线路）
+        run: |
+          if [ -d tests ]; then
+            python3 -m pip install --quiet pytest
+            # 依赖表还不存在时也别红：判据层测试刻意不依赖网络与框架
+            [ -f requirements-dev.txt ] && python3 -m pip install --quiet -r requirements-dev.txt
+            python3 -m pytest -q
+          else
+            echo "还没有 tests/，跳过（判据层落地时补上）"
+          fi
+
+      - name: 🧮 语法
+        run: python3 -m compileall -q tools $(ls -d watch main.py 2>/dev/null || true)

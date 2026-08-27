@@ -1,0 +1,23 @@
+# Codex CLI 的项目级配置。与 .claude/settings.json 指向同一个脚本，
+# 判定逻辑只有一份（tools/agent-guard.py）。
+#
+# 作用：在任意 Bash 命令执行**之前**把本克隆的 core.hooksPath 指向
+# tools/githooks/，于是 CLAUDE.md 的提交约定与 AGENTS.md §0 的分支纪律
+# 无需任何手动安装就会生效。详见 tools/agent-guard.py 顶部说明。
+#
+# 注意：项目级 .codex/ 层需要被信任才会加载（Codex 首次进入仓库时会问）。
+# 不信任也不影响正确性——只是退回到手动跑一次 bash tools/install-hooks.sh。
+
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+# 必须先判存在再执行：python3 打不开文件时退出码是 2，而 2 在两边的钩子契约里
+# 都表示「拒绝这次工具调用」。cwd 不在本仓库内（或没装这份仓库）时直接 exit 0，
+# 否则每一条 Bash 命令都会被拒掉。
+command = '''
+sh -c 'p="$(git rev-parse --show-toplevel 2>/dev/null)/tools/agent-guard.py"; [ -f "$p" ] || exit 0; exec python3 "$p"'
+'''
+timeout = 15
+statusMessage = "核对提交/分支规范"

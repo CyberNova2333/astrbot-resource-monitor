@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "comment": "本地配置**样例**。真配置请命名为 config.json（已被 .gitignore 挡住）或直接填在 AstrBot 的插件配置里。这一层只放两种东西：一个入口地址，以及本机才知道的东西（通知会话、凭证、开关）。线路表、文件清单、超时与速率阈值一律不在这里——它们在线上配置里已经有一份，监控要用同一份（CLAUDE.md 铁律 2）。所有示例地址用 example.test：RFC 6761 保留域名，永远不会解析到真东西。",
+
+  "entry_url": "https://api.example.test/path/to/config.json",
+
+  "notify": {
+    "comment": "推送目标。会话 ID 的格式由平台适配器决定，照抄 AstrBot 里看到的那一串。",
+    "sessions": ["<平台>:<会话类型>:<会话ID>"],
+    "at_all_on_p0": true,
+    "prefix": "",
+    "prefix_comment": "多地部署时给每个实例一个前缀（如「境内」「境外」），否则两边的告警在群里分不出是谁报的。"
+  },
+
+  "schedule": {
+    "comment": "探针节奏。P0 探针探的是「挂了用户立刻装不上」的环节，P1 是「影响一部分人或可以晚点发现」的。",
+    "interval_fast_seconds": 300,
+    "interval_slow_seconds": 3600,
+    "chunk_probes_per_cycle": 1
+  },
+
+  "alert": {
+    "comment": "告警行为。fire_after 是「三轮里坏两轮才报」，remind_every 是持续故障的重复提醒间隔——不是每轮都刷（CLAUDE.md 铁律 6）。",
+    "fire_after": [2, 3],
+    "recover_after": 2,
+    "remind_every_hours": 6,
+    "mute_command_admin_only": true
+  },
+
+  "runtime": {
+    "comment": "user_agent 刻意与客户端不同：混在一起的话，CDN 日志里监控流量和用户流量就分不开，以后想按 UA 统计装机量会废掉。state_dir 存故障状态机——不落盘的话 bot 一重启会把所有故障当成新故障重报一遍，那是告警疲劳最常见的来源。",
+    "user_agent": "resource-watch/1.0",
+    "state_dir": "data/",
+    "http_timeout_seconds": 30
+  }
+}

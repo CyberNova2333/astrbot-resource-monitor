@@ -1,0 +1,16 @@
+# ── git 钩子与工具脚本必须是 LF ────────────────────────────────────────
+#
+# Windows 上 Git 默认 core.autocrlf=true，会把文本文件检出成 CRLF。而 git 在
+# Windows 上也是用自带的 sh 执行钩子，sh 见到 `#!/bin/sh\r` 会报
+#
+#     bad interpreter: /bin/sh^M
+#
+# 钩子直接跑不起来 → git 拿到非零退出码 → 当成「检查没过」→ **连完全合规的
+# 提交也提不了**。这是 fail-closed，比钩子想强制的任何规则都糟糕，所以在这里
+# 把换行钉死。
+tools/githooks/*  text eol=lf
+tools/*.sh        text eol=lf
+tools/*.py        text eol=lf
+
+# .cmd 反过来：Windows 的批处理必须是 CRLF，否则某些 cmd.exe 版本解析会出错
+tools/*.cmd       text eol=crlf
