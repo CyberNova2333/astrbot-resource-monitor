@@ -144,7 +144,8 @@ class HotUpdateTest(unittest.TestCase):
         m = Monitor(cfg(), healthy_client())
         out = run(m.run_cycle(slow=True, now=1000))
         self.assertEqual(out.messages, [])
-        skipped = [r for r in out.results if r.unknown and "watch.version_files" in r.detail]
+        skipped = [r for r in out.results
+                   if r.unknown and "没有声明要探哪些热更版本文件" in r.detail]
         self.assertTrue(skipped)
 
     def test_full_package_check_on_version_change(self):
@@ -246,8 +247,8 @@ class EntryDownDiagnosisTest(unittest.TestCase):
         m = Monitor(local, client)
         out = run(m.run_cycle(now=1000))
         msg = out.messages[0]
-        self.assertIn("备用入口", msg)
-        self.assertIn("配置内容本身是好的", msg)
+        self.assertIn("备用出口", msg)
+        self.assertIn("文档内容本身是好的", msg)
 
     def test_broken_json_is_reported_as_content_not_reachability(self):
         client = healthy_client().raw(ENTRY_URL, b"{ half", status=200)
@@ -278,3 +279,50 @@ class ConfigMutationTest(unittest.TestCase):
         m.client = healthy_client().json(ENTRY_URL, stripped)
         out = run(m.run_cycle(now=2000))
         self.assertIn("阈值段消失", "\n".join(out.messages))
+
+
+class NoCentralConfigTest(unittest.TestCase):
+    """整轮不依赖任何中心配置：线路表由本地配置直接给。
+
+    老客户端那份 config.json 只是**其中一种**配置源；网页端不用它，监控也就
+    不该绑在它身上。这条测试盯的就是「没有它照样能跑完一整轮」。
+    """
+
+    def _cfg(self):
+        return from_mapping({
+            "source": {"type": "mirrors", "mirrors": [
+                {"name": "线路甲", "base": A},
+                {"name": "线路乙", "base": B}]},
+            "notify": {"sessions": ["群甲"]},
+            "alert": {"fire_after_failures": 1, "fire_window": 1,
+                      "recover_after_successes": 1}})
+
+    def test_full_cycle_without_any_upstream_config(self):
+        client = FakeClient()
+        for base in (A, B):
+            client.json(base + "manifest.json", MANIFEST)
+            client.routes[base + "pack.zip"] = range_response(CHUNK, 0, 15, 16)
+        m = Monitor(self._cfg(), client)
+        out = run(m.run_cycle(now=1000))
+        self.assertEqual(out.messages, [])
+        self.assertEqual(out.coverage.verified, 1)
+        self.assertEqual(len(out.config.enabled_mirrors), 2)
+
+    def test_mirror_failure_still_alerts(self):
+        client = FakeClient()
+        for base in (A, B):
+            client.raw(base + "manifest.json", b"", status=502)
+        m = Monitor(self._cfg(), client)
+        out = run(m.run_cycle(now=1000))
+        self.assertEqual(len(out.messages), 1)
+        self.assertIn("全部 2 条线路", out.messages[0])
+
+    def test_speed_stays_undecided_without_online_thresholds(self):
+        client = FakeClient()
+        for base in (A, B):
+            client.json(base + "manifest.json", MANIFEST)
+            client.routes[base + "pack.zip"] = range_response(CHUNK, 0, 15, 16)
+        out = run(Monitor(self._cfg(), client).run_cycle(now=1000))
+        speed = [r for r in out.results if r.probe == "线路速率"]
+        self.assertTrue(speed and all(r.unknown for r in speed),
+                        "没有线上阈值就别判速率，也别拿写死的默认值凑数")

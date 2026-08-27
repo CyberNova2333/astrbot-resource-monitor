@@ -1,14 +1,26 @@
 {
   "entry_url": {
-    "description": "线上配置入口地址",
+    "description": "配置源 A：线路表地址",
     "type": "string",
-    "hint": "整条链的入口，形如 https://api.example.test/path/to/config.json 。线路表、文件清单、阈值都从它后面自发现，插件里不留第二份。这个值不入库，只在这里填。",
+    "hint": "二选一之一。一个能拉到线路表的地址——那份 JSON 只要有 mirrors[]（每条带 base）就能用，settings / watch / client 有就多探两样、没有就少探两样。不必长成某一个客户端的配置的样子。形如 https://api.example.test/path/to/lines.json 。这个值不入库，只在这里填。",
     "default": ""
   },
   "entry_urls": {
-    "description": "备用入口（可选）",
+    "description": "配置源 A：备用出口（可选）",
     "type": "list",
     "hint": "同一份配置的其它出口。只在主入口失败时试，用来区分两种完全不同的故障：配置内容被人改坏了（要回滚）还是这个出口挂了（要找托管方）。备用能拉到**不会**让主入口那条 P0 降级——客户端只认它自己那份地址。",
+    "default": []
+  },
+  "mirrors": {
+    "description": "配置源 B：直接给线路表",
+    "type": "list",
+    "hint": "二选一之另一个：**不依赖任何中心配置**。一行一条线路，写「名称=https://a.example.test/」或光写地址。没有上游就没有上游单点；代价是拿不到线上阈值，速率一类的判据会保持未判定（不会拿写死的默认值凑数）。填了 entry_url 时以 entry_url 为准。",
+    "default": []
+  },
+  "version_files": {
+    "description": "配置源 B：要探的热更版本文件（可选）",
+    "type": "list",
+    "hint": "只在「直接给线路表」模式下用；用 entry_url 时由那份文档自己声明。不填就不探热更——不知道该探什么时保持沉默。",
     "default": []
   },
   "notify": {

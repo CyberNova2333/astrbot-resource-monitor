@@ -19,16 +19,17 @@ import unicodedata
 from typing import Dict, Iterable, List, Optional, Sequence
 
 from .models import ProbeResult, Severity
-from .probes import (PROBE_CHUNK, PROBE_CONSISTENCY, PROBE_ENTRY, PROBE_HOTPKG,
-                     PROBE_MANIFEST, PROBE_RANGE, PROBE_SANITY, PROBE_SPEED,
-                     PROBE_TLS, PROBE_VERSION)
+from .probes import (PROBE_CHUNK, PROBE_CONSISTENCY, PROBE_HOTPKG, PROBE_MANIFEST,
+                     PROBE_RANGE, PROBE_SANITY, PROBE_SPEED, PROBE_TLS,
+                     PROBE_VERSION)
+from .sources import PROBE_SOURCE
 from .scheduler import CoverageReport
 from .state import Notification
 
 # 「这个探针挂了，用户会怎样」。写在这里是因为它是**监控自己的知识**，
 # 不是被监控方的配置——不属于「不许留第二份」的那类东西。
 IMPACT = {
-    PROBE_ENTRY: "客户端拿不到线路表，会静默回退到内置线路；用户无感，只有监控看得见",
+    PROBE_SOURCE: "拿不到线路表，客户端会静默回退到它内置的那条；用户无感，只有监控看得见",
     PROBE_SANITY: "配置本身会误伤用户（版本闸门/线路开关写错，影响面是全体）",
     PROBE_MANIFEST: "新用户装不了资源包，老用户的热更也会停",
     PROBE_CHUNK: "这条线路上的文件字节是坏的——用户能下完，但装不上",
@@ -212,28 +213,35 @@ def render_coverage(coverage: CoverageReport, window_days: float = 7.0) -> str:
     return "\n".join(lines)
 
 
-def render_online_config(cfg, extra_lines: Optional[Iterable[str]] = None) -> str:
-    """`/线路 配置`：打印线上配置的关键字段。
+def render_online_config(disc, extra_lines: Optional[Iterable[str]] = None) -> str:
+    """`/线路 配置`：打印这一轮自发现到的东西。
 
-    这是运行期从线上取来的东西，打给运维看没问题；**入库的源码里一个地址都
-    不许有**是另一回事（CLAUDE.md 铁律 1）。
+    打印的是运行期取来的值，给运维看没问题；**入库的源码里一个地址都不许有**
+    是另一回事（CLAUDE.md 铁律 1）。
+
+    参数是 `Discovered`，不是某一份配置的原始形状——换配置源这段不用改。
     """
-    lines = ["线上配置 · 关键字段", "  schema：%s" % cfg.schema]
-    client_ver = cfg.client.get("version")
-    if client_ver:
-        lines.append("  版本闸门：%s" % client_ver)
-    lines.append("  线路：%d 条，%d 条启用" % (len(cfg.mirrors), len(cfg.enabled_mirrors)))
-    for m in cfg.mirrors:
+    lines = ["配置源 · 这一轮拿到了什么",
+             "  源类型：%s" % (disc.source_name or "未知")]
+    if disc.client_version:
+        lines.append("  版本闸门：%s" % disc.client_version)
+    lines.append("  线路：%d 条，%d 条启用" % (len(disc.mirrors), len(disc.enabled_mirrors)))
+    for m in disc.mirrors:
         lines.append("    %s %s（weight=%s chunks=%s）"
                      % ("✅" if m.enabled else "⛔", m.name, m.weight, m.chunks))
     known = [("换线失败阈值", "switch_after_failures"), ("停滞秒数", "stall_seconds"),
              ("最低速率 kbps", "min_speed_kbps"), ("冷却毫秒", "cooldown_ms")]
-    shown = [(label, cfg.threshold(key)) for label, key in known]
+    shown = [(label, disc.threshold(key)) for label, key in known]
     shown = [(label, v) for label, v in shown if v is not None]
     if shown:
         lines.append("  判据阈值（监控与客户端同源，用的就是这几个数）：")
         for label, v in shown:
             lines.append("    %s：%g" % (label, v))
+    else:
+        lines.append("  这个源没给阈值——速率一类的判据保持未判定"
+                     "（不拿写死的默认值凑数）")
+    if disc.version_files:
+        lines.append("  热更探针：%s" % "、".join(disc.version_files))
     for extra in extra_lines or []:
         lines.append("  %s" % extra)
     return "\n".join(lines)
