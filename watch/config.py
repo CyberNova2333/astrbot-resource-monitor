@@ -99,6 +99,8 @@ class LocalConfig:
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     alert: AlertConfig = field(default_factory=AlertConfig)
     degraded: DegradedConfig = field(default_factory=DegradedConfig)
+    # 命令闸门的原始配置，判据在 watch/commands.py（那边是纯函数，可单测）
+    command: dict = field(default_factory=dict)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
 
     @property
@@ -291,6 +293,7 @@ def from_mapping(data: dict) -> LocalConfig:
             remind_every_hours=max(0.5, _float(alert_raw, "remind_every_hours", 6.0)),
             mute_command_admin_only=_bool(alert_raw, "mute_command_admin_only", True),
         ),
+        command=_section(data, "command"),
         degraded=DegradedConfig(
             stale_config_max_age_seconds=max(
                 0.0, _float(degraded_raw, "stale_config_max_age_seconds", 86400.0)),

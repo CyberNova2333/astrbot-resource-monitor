@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import time
 from typing import List, Optional
@@ -24,7 +23,7 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star, register
 
-from watch import render
+from watch import commands, render, store
 from watch.config import ConfigError, LocalConfig, load as load_config
 from watch.http import AiohttpClient
 from watch.runner import Monitor
@@ -44,6 +43,10 @@ class ResourceWatch(Star):
         self.client: Optional[AiohttpClient] = None
         self._task: Optional[asyncio.Task] = None
         self._stop = asyncio.Event()
+        self.gate: Optional[commands.CommandGate] = None
+        # 一次只跑一轮。没有这把锁的话，群里一条命令就能和后台循环**并发**跑：
+        # 两轮同时改轮转游标与状态机（重复告警、覆盖率记错），流量也翻倍。
+        self._cycle_lock = asyncio.Lock()
 
     # ── 生命周期 ────────────────────────────────────────────
     async def initialize(self):
@@ -59,6 +62,7 @@ class ResourceWatch(Star):
             timeout_seconds=self.cfg.runtime.http_timeout_seconds,
             max_body_bytes=self.cfg.runtime.max_body_bytes)
         self.monitor = Monitor(self.cfg, self.client)
+        self.gate = commands.build(self.cfg.notify.sessions, self.cfg.command)
         self._restore()
         self._task = asyncio.create_task(self._loop(), name="resource-watch")
         logger.info("[线路监控] 已启动，快周期 %ds / 慢周期 %ds",
@@ -85,7 +89,8 @@ class ResourceWatch(Star):
             now = time.time()
             slow = now - last_slow >= self.cfg.schedule.interval_slow_seconds
             try:
-                outcome = await self.monitor.run_cycle(slow=slow, now=now)
+                async with self._cycle_lock:
+                    outcome = await self.monitor.run_cycle(slow=slow, now=now)
                 if slow:
                     last_slow = now
                 for message in outcome.messages:
@@ -120,36 +125,38 @@ class ResourceWatch(Star):
         return self.cfg.state_path
 
     def _persist(self):
+        # 原子写只有一份实现（watch/store.py）——两份会各自长歪，而差别只在
+        # 断电或磁盘满的时候现形。
         if not self.monitor:
             return
-        path = self._state_path()
-        try:
-            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-            tmp = path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self.monitor.snapshot(), f, ensure_ascii=False)
-            os.replace(tmp, path)
-        except OSError as e:
-            logger.warning("[线路监控] 状态写不进去（可丢，不影响探测）：%s", e)
+        why = store.save_json(self._state_path(), self.monitor.snapshot())
+        if why:
+            logger.warning("[线路监控] 状态写不进去（可丢，不影响探测）：%s", why)
 
     def _restore(self):
         if not self.monitor:
             return
-        try:
-            with open(self._state_path(), "r", encoding="utf-8") as f:
-                self.monitor.restore(json.load(f))
-        except (OSError, ValueError):
-            pass          # 没有就是全新开始，最多重报一次
+        self.monitor.restore(store.load_json(self._state_path()) or {})
 
     # ── 命令 ────────────────────────────────────────────────
     @filter.command("线路")
     async def route(self, event: AstrMessageEvent):
         """线路监控：状态 / 测 <线路名> / 配置 / 静音 <时长> / 覆盖率"""
-        args = _args(event)
-        sub = args[0] if args else "状态"
-        if not self.monitor or not self.cfg:
+        if not self.monitor or not self.cfg or not self.gate:
             yield event.plain_result(
                 "线路监控没有启动：没有配置源（entry_url 或 mirrors 二选一），见日志。")
+            return
+
+        args = _args(event)
+        sub = args[0] if args else "状态"
+
+        # 闸门在最前面：这个插件跑在共享的聊天环境里，命令会产生真实流量。
+        # 拒绝理由为空字符串 = 静默拒绝（不在允许的会话里，连回都不回）。
+        refuse = self.gate.refuse_reason(sub, session=_session_of(event),
+                                         is_admin=_is_admin(event))
+        if refuse is not None:
+            if refuse:
+                yield event.plain_result(refuse)
             return
 
         if sub in ("状态", "status"):
@@ -162,13 +169,29 @@ class ResourceWatch(Star):
             if not name:
                 yield event.plain_result("要测哪条线路？用 /线路 配置 看名字。")
                 return
-            yield event.plain_result("在测「%s」，一轮下来要几十秒……" % name)
-            outcome = await self.monitor.run_cycle(slow=True, only_mirror=name)
+            if self._cycle_lock.locked():
+                yield event.plain_result("正在跑一轮，等它跑完再来——同时跑两轮"
+                                         "只会把流量翻倍，结论还会互相打架。")
+                return
+            self.gate.mark(sub)
+            yield event.plain_result("在测「%s」，一轮下来要几十秒……" % render.safe(name))
+            async with self._cycle_lock:
+                # allow_heavy=False：命令触发的轮次不下整包（几百 MB）。
+                outcome = await self.monitor.run_cycle(
+                    slow=True, only_mirror=name, allow_heavy=False)
+            self._persist()
             yield event.plain_result(render.render_status(outcome.results))
         elif sub in ("配置", "config"):
-            outcome = await self.monitor.run_cycle()
+            if self._cycle_lock.locked():
+                yield event.plain_result("正在跑一轮，稍等。")
+                return
+            self.gate.mark(sub)
+            async with self._cycle_lock:
+                outcome = await self.monitor.run_cycle(allow_heavy=False)
+            self._persist()
             if outcome.config is None:
-                yield event.plain_result("拉不到线上配置：%s" % outcome.results[0].detail)
+                yield event.plain_result("拉不到配置源：%s"
+                                         % render.safe(outcome.results[0].detail, 300))
             else:
                 yield event.plain_result(render.render_online_config(outcome.config))
         elif sub in ("静音", "mute"):
@@ -185,18 +208,16 @@ class ResourceWatch(Star):
             yield event.plain_result(
                 "线路监控：\n"
                 "  /线路 状态         当前红绿一览\n"
-                "  /线路 测 <线路名>   立刻对某条线路跑一轮\n"
-                "  /线路 配置         线上配置的关键字段\n"
-                "  /线路 静音 30m     维护窗口（支持 30m / 2h / 90）\n"
+                "  /线路 测 <线路名>   立刻对某条线路跑一轮（管理员，有冷却）\n"
+                "  /线路 配置         配置源的关键字段（管理员，有冷却）\n"
+                "  /线路 静音 30m     维护窗口（管理员）\n"
                 "  /线路 取消静音\n"
                 "  /线路 覆盖率       抽样块校验覆盖到哪了")
 
     def _mute(self, event: AstrMessageEvent, rest: List[str]) -> str:
+        # 权限已由命令闸门统一判过（watch/commands.py）：静音把所有告警关掉，
+        # 而关掉之后没有任何人会知道。
         assert self.cfg and self.monitor
-        if self.cfg.alert.mute_command_admin_only and not _is_admin(event):
-            # 静音不是可选项（自己调线路时会被自己的 bot 轰炸），但也不能人人可用
-            # ——否则群友能把告警关掉，而关掉之后没有任何人会知道。
-            return "只有管理员能静音。"
         seconds = _duration(" ".join(rest)) if rest else 1800.0
         if seconds is None:
             return "看不懂这个时长。写成 30m / 2h / 45（分钟）。"
@@ -219,6 +240,22 @@ def _args(event: AstrMessageEvent) -> List[str]:
     if parts and parts[0].lstrip("/") in ("线路", "route"):
         parts = parts[1:]
     return parts
+
+
+def _session_of(event: AstrMessageEvent) -> str:
+    """这条命令是从哪个会话来的。取不到就返回空串——**空串不匹配任何允许项**，
+    于是闸门默认拒绝。取不到来源时放行是最糟的选择：那正是别人的群。"""
+    for name in ("unified_msg_origin", "session_id"):
+        value = getattr(event, name, None)
+        if isinstance(value, str) and value:
+            return value
+    getter = getattr(event, "get_session_id", None)
+    if callable(getter):
+        try:
+            return str(getter() or "")
+        except Exception:                                     # noqa: BLE001
+            return ""
+    return ""
 
 
 def _is_admin(event: AstrMessageEvent) -> bool:

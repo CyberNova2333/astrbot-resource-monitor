@@ -94,6 +94,17 @@ BARE_HOST = re.compile(
     r"(?:com|net|org|io|dev|app|top|cn|xyz|site|club|tv|test|invalid))"
     r"(?![\w-]|\()")
 EMAIL = re.compile(r"[\w.+-]+@([\w.-]+\.[a-z]{2,})", re.I)
+VERSION_LINE = re.compile(r"版本|version|\bver\b|\bv\d|tag", re.I)
+# 裸 IPv4 字面量。公网地址同样是「会跟着部署走」的东西，而它没有 TLD，
+# 上面那条主机名规则看不见它。四段都要求 ≤255、后面不接更多点号；
+# 不可路由的那些在 host_allowed 里放行。
+#
+# 四段版本号（`1.2.3.4`）与它撞形状，所以**整行提到版本就跳过这一条**——
+# 一个会拦下正常提交的守卫，用不了几天就会被人习惯性加逃生口跳过。
+# 代价是漏掉「写在版本说明那一行里的真 IP」，那是可以接受的漏报。
+BARE_IPV4 = re.compile(
+    r"(?<![\w.:-])((?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)"
+    r"(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})(?![\w.-])")
 # 凭证形状：这几种一眼可辨，不会误伤
 SECRETS = (
     (re.compile(r"\bghp_[A-Za-z0-9]{20,}"), "GitHub personal access token"),
@@ -111,7 +122,28 @@ def host_allowed(host):
     host = host.split("@")[-1].split(":")[0].strip().lower().rstrip(".")
     if not host or any(c in host for c in PLACEHOLDER_CHARS):
         return True                      # <主域> / {base} / … 这类占位符
-    return any(host == h or host.endswith("." + h) for h in ALLOWED_HOSTS)
+    if any(host == h or host.endswith("." + h) for h in ALLOWED_HOSTS):
+        return True
+    return _is_unroutable_literal(host)
+
+
+def _is_unroutable_literal(host):
+    """回环/私网/链路本地的**字面量 IP** 放行。
+
+    理由：这类地址不可能是一条对外分发线路——它们不路由到公网，写下来不构成
+    「把线上拓扑公开」。而 SSRF 守卫（probes.check_mirror_targets）恰恰要在
+    注释与测试里把它们**指名道姓**地写出来，否则那条守卫自己没法解释、也没法测。
+
+    残留风险是有人拿它写内网主机地址；判据只放行 IP 字面量、不放行任何域名，
+    所以能漏出去的最多是一个不可路由的网段号。
+    """
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address(host.strip("[]"))
+    except ValueError:
+        return False
+    return (ip.is_private or ip.is_loopback or ip.is_link_local
+            or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
 
 
 def tracked_files():
@@ -131,6 +163,13 @@ def scan_line(path, lineno, line, out):
         if not any(dom == d or dom.endswith("." + d) for d in ALLOWED_MAIL_DOMAINS):
             out.append((path, lineno, "邮箱 %s" % m.group(0),
                         "收件人走部署侧配置，不入库"))
+    version_ish = VERSION_LINE.search(line) is not None
+    for m in BARE_IPV4.finditer(line):
+        if version_ish:
+            break
+        if not host_allowed(m.group(1)):
+            out.append((path, lineno, "IP 地址 %s" % m.group(1),
+                        "地址一律运行时取，源码与文档里不出现"))
     for m in BARE_HOST.finditer(line):
         host = m.group(1)
         if EMAIL.search(line) and ("@" + host) in line:

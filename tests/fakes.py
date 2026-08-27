@@ -50,17 +50,20 @@ class FakeClient(HttpClient):
             raise HttpError("连不上：测试里没布置 %s" % url)
         if isinstance(route, HttpError):
             raise route
-        if isinstance(route, HttpResponse) and route.status == 206:
-            return route
         return route
 
-    async def digest(self, url, *, headers=None) -> DigestResult:
+    async def digest(self, url, *, headers=None, max_bytes=None) -> DigestResult:
         self.calls.append(("digest", url, dict(headers or {})))
         route = self.routes.get("digest:" + url)
         if route is None:
             raise HttpError("连不上：测试里没布置 digest %s" % url)
         if isinstance(route, HttpError):
             raise route
+        if max_bytes and route.size > max_bytes:
+            # 真实现是「下到超过上限就中断」；假实现照做，否则测不到那条判据。
+            return DigestResult(status=route.status, headers=dict(route.headers),
+                                size=max_bytes + 1, md5="", elapsed_ms=route.elapsed_ms,
+                                overflow=True)
         return route
 
 
