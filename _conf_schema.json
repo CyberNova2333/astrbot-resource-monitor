@@ -5,6 +5,12 @@
     "hint": "整条链的入口，形如 https://api.example.test/path/to/config.json 。线路表、文件清单、阈值都从它后面自发现，插件里不留第二份。这个值不入库，只在这里填。",
     "default": ""
   },
+  "entry_urls": {
+    "description": "备用入口（可选）",
+    "type": "list",
+    "hint": "同一份配置的其它出口。只在主入口失败时试，用来区分两种完全不同的故障：配置内容被人改坏了（要回滚）还是这个出口挂了（要找托管方）。备用能拉到**不会**让主入口那条 P0 降级——客户端只认它自己那份地址。",
+    "default": []
+  },
   "notify": {
     "description": "通知",
     "type": "object",
@@ -125,6 +131,24 @@
         "description": "配置/清单类响应的大小上限（字节）",
         "type": "int",
         "default": 4194304
+      }
+    }
+  },
+  "degraded": {
+    "description": "入口挂掉时",
+    "type": "object",
+    "items": {
+      "probe_with_stale_config": {
+        "description": "用上一次的好线路表继续探",
+        "type": "bool",
+        "hint": "入口挂了的时候恰恰最需要信息：线路是不是也一起挂了？结论只作线索（标为未判定、永不触发告警），不拿旧配置判绿。",
+        "default": true
+      },
+      "stale_config_max_age_seconds": {
+        "description": "旧线路表的保质期（秒）",
+        "type": "int",
+        "hint": "超过就不用了——一天前的线路表说明不了现在，过期的线索会把人带偏。",
+        "default": 86400
       }
     }
   }

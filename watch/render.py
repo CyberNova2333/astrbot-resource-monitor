@@ -98,7 +98,8 @@ def escalated_severity(group: Sequence[Notification], enabled_mirrors: int) -> S
 
 def render_group(group: Sequence[Notification], *, enabled_mirrors: int = 0,
                  prefix: str = "", at_all: bool = False,
-                 upstream_line: str = "") -> str:
+                 upstream_line: str = "",
+                 extra_lines: Optional[Sequence[str]] = None) -> str:
     """渲染一组同类通知。"""
     if not group:
         return ""
@@ -120,13 +121,20 @@ def render_group(group: Sequence[Notification], *, enabled_mirrors: int = 0,
                    if enabled_mirrors and len(group) >= enabled_mirrors > 1
                    else ("%d 个目标" % len(group) if len(group) > 1 else group[0].result.target))
     verb = "仍在失败" if head.kind == "remind" else "失败"
-    lines = ["%s %s · %s%s %s %s" % (sev.emoji, sev.value, tag, title_scope, probe, verb)]
+    # 目标名已经包含在探针名里时不要重复（「线上配置 线上配置可达性 失败」）。
+    if title_scope and title_scope in probe:
+        title_scope = ""
+    lines = ["%s %s · %s%s%s %s" % (sev.emoji, sev.value, tag, title_scope,
+                                    (" " if title_scope else "") + probe, verb)]
     lines.append("")
     lines.append("  探针：%s" % probe)
     if IMPACT.get(probe):
         lines.append("  影响：%s" % IMPACT[probe])
     if head.since:
-        lines.append("  已持续：%s（首次失败 %s）"
+        # 刚坏就报的时候写「已持续 0 秒」是句废话，还会让人以为监控在抽风。
+        lines.append("  已持续：本轮首次失败（%s）" % _clock(head.since)
+                     if head.duration_seconds < 60 else
+                     "  已持续：%s（首次失败 %s）"
                      % (human_duration(head.duration_seconds), _clock(head.since)))
     lines.append("")
     width = max((_width(n.result.target) for n in group), default=0)
@@ -135,6 +143,12 @@ def render_group(group: Sequence[Notification], *, enabled_mirrors: int = 0,
     if upstream_line:
         lines.append("")
         lines.append("  %s" % upstream_line)
+    # 降级诊断：入口挂了的时候，这几行回答的是「坏到什么程度、下一步去哪」。
+    # 没有它，收到 P0 的人第一件事还是得自己爬起来挨个试。
+    if extra_lines:
+        lines.append("")
+        for extra in extra_lines:
+            lines.append("  %s" % extra)
     if at_all and sev == Severity.P0:
         lines.append("")
         lines.append("@全体成员")

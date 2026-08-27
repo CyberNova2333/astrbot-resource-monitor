@@ -56,6 +56,27 @@ class AlertConfig:
 
 
 @dataclass
+class DegradedConfig:
+    """入口挂了以后怎么办。
+
+    入口是整条链的单点：它一挂，监控既不知道有哪几条线路，也不知道按什么判。
+    但**「不知道」不等于「什么都别做」**——那恰恰是最需要信息的时刻。所以：
+
+      · 备用入口（同一份配置的另一个出口）用来区分两种完全不同的故障：
+        「配置内容被人改坏了」和「这个出口/域名挂了」，处置方式一个是回滚、
+        一个是找托管方；
+      · 上一次拉到的好配置留一份**只用来继续探**，不用来判绿——用旧线路表
+        探出来的结论一律标成「仅供参考」，永远不触发告警。拿旧数字当判据
+        就是铁律 2 说的那种漂移；拿旧线路表当**线索**不是。
+
+    旧配置有保质期：超过 max_age 就不用了。一天前的线路表说明不了现在。
+    """
+
+    stale_config_max_age_seconds: float = 86400.0
+    probe_with_stale_config: bool = True
+
+
+@dataclass
 class RuntimeConfig:
     # 刻意与客户端不同：混在一起的话，日志里监控流量与用户流量就分不开了。
     user_agent: str = "resource-watch/1.0"
@@ -66,11 +87,23 @@ class RuntimeConfig:
 
 @dataclass
 class LocalConfig:
-    entry_url: str
+    # 第一条是**主入口**（客户端用的那个）。其余是备用出口：只在主入口失败时
+    # 试，用来判断「配置内容坏了」还是「这个出口挂了」。备用入口通不通都不影响
+    # 主入口那条 P0——客户端只认它自己那份地址。
+    entry_urls: List[str] = field(default_factory=list)
     notify: NotifyConfig = field(default_factory=NotifyConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     alert: AlertConfig = field(default_factory=AlertConfig)
+    degraded: DegradedConfig = field(default_factory=DegradedConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
+
+    @property
+    def entry_url(self) -> str:
+        return self.entry_urls[0]
+
+    @property
+    def backup_entry_urls(self) -> List[str]:
+        return self.entry_urls[1:]
 
     @property
     def state_path(self) -> str:
@@ -143,8 +176,21 @@ def from_mapping(data: dict) -> LocalConfig:
     alert_raw = _section(data, "alert")
     rt_raw = _section(data, "runtime")
 
+    raw_urls = data.get("entry_urls")
+    if isinstance(raw_urls, str):
+        raw_urls = [raw_urls]
+    if not isinstance(raw_urls, list):
+        raw_urls = []
+    urls = [_str({"u": u}, "u") for u in raw_urls]
+    primary = _str(data, "entry_url")
+    if primary:
+        urls = [primary] + [u for u in urls if u != primary]
+    if not urls:
+        validate_entry_url("")                    # 抛出那条写得清楚的 ConfigError
+    degraded_raw = _section(data, "degraded")
+
     cfg = LocalConfig(
-        entry_url=validate_entry_url(_str(data, "entry_url")),
+        entry_urls=[validate_entry_url(u) for u in urls],
         notify=NotifyConfig(
             sessions=sessions,
             at_all_on_p0=_bool(notify_raw, "at_all_on_p0", True),
@@ -165,6 +211,11 @@ def from_mapping(data: dict) -> LocalConfig:
             recover_after_successes=max(1, _int(alert_raw, "recover_after_successes", 2)),
             remind_every_hours=max(0.5, _float(alert_raw, "remind_every_hours", 6.0)),
             mute_command_admin_only=_bool(alert_raw, "mute_command_admin_only", True),
+        ),
+        degraded=DegradedConfig(
+            stale_config_max_age_seconds=max(
+                0.0, _float(degraded_raw, "stale_config_max_age_seconds", 86400.0)),
+            probe_with_stale_config=_bool(degraded_raw, "probe_with_stale_config", True),
         ),
         runtime=RuntimeConfig(
             user_agent=_str(rt_raw, "user_agent", "resource-watch/1.0") or "resource-watch/1.0",

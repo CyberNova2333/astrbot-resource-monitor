@@ -77,9 +77,13 @@ async def probe_entry(client: HttpClient, entry_url: str
     try:
         cfg, resp = await discovery.fetch_online_config(client, entry_url)
     except discovery.DiscoveryError as e:
+        # 两种坏法分开记：内容坏了要回滚，拉不到要找出口那边。
+        content = isinstance(e, discovery.ContentError)
         return ProbeResult(
             ok=False, probe=PROBE_ENTRY, target="线上配置",
-            detail=str(e), elapsed_ms=_ms(t0), severity=Severity.P0), None
+            detail=("内容坏了：%s" if content else "拉不到：%s") % e,
+            elapsed_ms=_ms(t0), severity=Severity.P0,
+            extra={"reason": "content" if content else "unreachable"}), None
 
     enabled = cfg.enabled_mirrors
     return ProbeResult(
@@ -88,6 +92,75 @@ async def probe_entry(client: HttpClient, entry_url: str
                % (cfg.schema, len(cfg.mirrors), len(enabled), resp.elapsed_ms),
         elapsed_ms=resp.elapsed_ms, severity=Severity.P0,
         extra={"enabled": len(enabled), "total": len(cfg.mirrors)}), cfg
+
+
+async def probe_entry_backups(client: HttpClient, urls: Sequence[str]
+                              ) -> Tuple[List[str], Optional[OnlineConfig]]:
+    """主入口挂了以后，试一遍备用出口。返回 (给人看的几行, 拿到的配置)。
+
+    它不产生告警——**备用入口通不通都不改变主入口那条 P0**：客户端只认它自己
+    那份地址，备用能拉到并不代表用户没事。它回答的是另一个问题：坏的是内容
+    还是这个出口。这两件事的处置方式完全不同。
+    """
+    lines: List[str] = []
+    got: Optional[OnlineConfig] = None
+    for url in urls:
+        try:
+            cfg, _ = await discovery.fetch_online_config(client, url)
+        except discovery.ContentError as e:
+            lines.append("备用入口 %s：内容同样是坏的（%s）" % (_short(url), e))
+            continue
+        except discovery.DiscoveryError as e:
+            lines.append("备用入口 %s：也拉不到（%s）" % (_short(url), e))
+            continue
+        lines.append("备用入口 %s：正常，%d 条线路（%d 启用）"
+                     % (_short(url), len(cfg.mirrors), len(cfg.enabled_mirrors)))
+        got = got or cfg
+    if got is not None:
+        lines.append("→ 配置内容本身是好的，坏的是主入口那个出口")
+    elif lines:
+        lines.append("→ 备用出口也拿不到好配置，多半不是单个出口的问题")
+    return lines, got
+
+
+def _short(url: str) -> str:
+    """只留主机名：告警里给人认，不需要整条路径。"""
+    from urllib.parse import urlparse
+    try:
+        return urlparse(url).hostname or url
+    except ValueError:
+        return url
+
+
+def check_config_mutation(cfg: OnlineConfig, last_good: Optional[dict]
+                          ) -> List[ProbeResult]:
+    """与上一次的好配置比：**这次改动是不是把自己打死了**。
+
+    判据只挑「一眼可辨、且后果是全体用户」的那几种突变；小改动一律放行。
+    会误报的配置守卫比没有守卫更糟——被误伤一次，人就再也不信这条告警了。
+    """
+    out: List[ProbeResult] = []
+    if not isinstance(last_good, dict):
+        return out
+
+    prev = OnlineConfig(raw=last_good, mirrors=[])
+    prev_mirrors = [m for m in (last_good.get("mirrors") or [])
+                    if isinstance(m, dict) and m.get("enabled", True)]
+    now_count, prev_count = len(cfg.enabled_mirrors), len(prev_mirrors)
+    if prev_count >= 2 and now_count * 2 <= prev_count:
+        out.append(ProbeResult(
+            ok=False, probe=PROBE_SANITY, target="线路表突变",
+            detail="启用的线路从 %d 条掉到 %d 条——改配置时手滑关掉一批，"
+                   "剩下的会被瞬间打满" % (prev_count, now_count),
+            severity=Severity.P0, suppress_key=KEY_ENTRY))
+
+    if prev.settings and not cfg.settings:
+        out.append(ProbeResult(
+            ok=False, probe=PROBE_SANITY, target="阈值段消失",
+            detail="settings 段没了——客户端会退回内置默认值，实际行为与你以为的"
+                   "不一样，而且监控这边的速率判据也跟着失效",
+            severity=Severity.P1, suppress_key=KEY_ENTRY))
+    return out
 
 
 def check_config_sanity(cfg: OnlineConfig,

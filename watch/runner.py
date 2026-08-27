@@ -21,7 +21,7 @@ main.py 只做两件事：把这里的 `Monitor` 按时叫醒，把它吐出来�
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
@@ -64,6 +64,10 @@ class Monitor:
             min_interval_seconds=cfg.schedule.hot_package_min_interval_seconds)
         self.last_versions: Dict[str, int] = {}
         self.last_results: List[ProbeResult] = []
+        # 上一次拉到的**好**配置。只用来在入口挂掉时继续探（降级诊断），
+        # **绝不用来判绿**——拿旧数字当判据就是铁律 2 说的漂移。
+        self.last_good_raw: Optional[dict] = None
+        self.last_good_at: float = 0.0
         # 最近一次拿到的清单：`/线路 覆盖率` 要拿它当分母，没有清单就说不出
         # 覆盖率（而不是报一个 0% 或 100%，那两个数都在骗人）。
         self.last_entries: Dict[str, FileEntry] = {}
@@ -77,13 +81,20 @@ class Monitor:
         entry_result, cfg = await probes.probe_entry(self.client, self.cfg.entry_url)
         out.results.append(entry_result)
         if cfg is None:
-            # 入口挂了就到此为止：下游探针此刻探什么都没有意义（探哪里都不知道），
-            # 硬探一轮只会在群里刷一堆必然失败。
+            # 入口挂了：**不是就此收工**。这时候恰恰最需要信息——是配置内容被人
+            # 改坏了，还是这个出口挂了？线路那边是不是也一起挂了？所以这里不判绿，
+            # 但继续用能拿到的线索探一轮，把结论附在那条 P0 后面。
+            extra = await self._diagnose_entry_failure(now)
+            out.results.extend(extra.results)
             out.messages = self._notify(out.results, enabled_mirrors=0, now=now,
-                                        entry_result=entry_result)
+                                        entry_result=entry_result,
+                                        extra_lines=extra.lines)
             self.last_results = out.results
             return out
 
+        out.results.extend(probes.check_config_mutation(cfg, self.last_good_raw))
+        self.last_good_raw = cfg.raw
+        self.last_good_at = now
         out.config = cfg
         out.results.extend(probes.check_config_sanity(
             cfg, self.state.note(NOTE_CLIENT_VERSION)))
@@ -127,6 +138,64 @@ class Monitor:
                                     now=now, entry_result=entry_result)
         self.last_results = out.results
         return out
+
+    # ── 入口挂掉时的降级诊断 ────────────────────────────────
+    async def _diagnose_entry_failure(self, now: float) -> "Degraded":
+        """入口拉不到时，尽量把「坏到什么程度」说清楚。
+
+        两条线索，都不产生告警（它们全部标成未判定）：
+
+          1. **备用出口**——区分「配置内容坏了」（要回滚）与「这个出口挂了」
+             （要找托管方）。备用能拉到并不代表用户没事：客户端只认它自己那份
+             地址，所以主入口那条 P0 一个字都不减；
+          2. **上一次的好线路表**——只用来问「线路是不是也一起挂了」。这决定了
+             收到告警的人下一步去哪：只有入口挂 = 客户端还在靠内置线路撑着；
+             连线路也挂 = 用户现在真的装不上。
+
+        旧线路表有保质期。一天前的线路表说明不了现在，过期就不用——**说不出来
+        比说错强**。
+        """
+        deg = Degraded()
+        if self.cfg.backup_entry_urls:
+            lines, _ = await probes.probe_entry_backups(
+                self.client, self.cfg.backup_entry_urls)
+            deg.lines.extend(lines)
+
+        if not self.cfg.degraded.probe_with_stale_config:
+            return deg
+        age = now - self.last_good_at if self.last_good_at else None
+        if not self.last_good_raw or age is None:
+            deg.lines.append("没有可用的旧线路表（这轮是第一次跑，或状态刚清过），"
+                             "线路那边现在是什么状况说不出来")
+            return deg
+        if age > self.cfg.degraded.stale_config_max_age_seconds:
+            deg.lines.append("旧线路表是 %.1f 小时前的，太旧了不拿它探——"
+                             "过期的线索会把人带偏" % (age / 3600.0))
+            return deg
+
+        stale_cfg = OnlineConfig(raw=self.last_good_raw,
+                                 mirrors=discovery.parse_online_config(
+                                     _dumps(self.last_good_raw)).mirrors)
+        mirrors = stale_cfg.enabled_mirrors
+        if not mirrors:
+            return deg
+        alive = 0
+        for mirror in mirrors:
+            result, _ = await probes.probe_manifest(self.client, mirror)
+            if result.ok:
+                alive += 1
+            # 标成未判定：用旧线路表探出来的东西只是线索，不进状态机、不触发告警。
+            deg.results.append(replace(
+                result, unknown=True,
+                detail="（旧线路表，仅供参考）" + result.detail))
+        deg.lines.append("用 %s前的旧线路表顺带探了一下：%d/%d 条线路的清单还拿得到"
+                         % (_human_age(age), alive, len(mirrors)))
+        deg.lines.append("→ " + ("线路那边看着是好的，客户端此刻靠内置线路还能撑，"
+                                 "但新配置下不去" if alive == len(mirrors) else
+                                 ("线路也在挂，用户现在多半真的装不上"
+                                  if alive == 0 else
+                                  "部分线路同时在挂，别只盯着入口")))
+        return deg
 
     # ── 抽样块 ──────────────────────────────────────────────
     async def _chunk_round(self, mirrors: Sequence[Mirror],
@@ -197,7 +266,8 @@ class Monitor:
 
     # ── 出消息 ──────────────────────────────────────────────
     def _notify(self, results: Sequence[ProbeResult], *, enabled_mirrors: int,
-                now: float, entry_result: ProbeResult) -> List[str]:
+                now: float, entry_result: ProbeResult,
+                extra_lines: Optional[Sequence[str]] = None) -> List[str]:
         notes = self.state.ingest(results, now=now)
         if not notes:
             return []
@@ -206,12 +276,15 @@ class Monitor:
         messages = []
         for group in render.group_notifications(notes, enabled_mirrors):
             # 入口自己那条不需要再附一行「上游正常」——它就是上游。
-            attach = "" if group[0].result.probe == probes.PROBE_ENTRY else line
+            is_entry = group[0].result.probe == probes.PROBE_ENTRY
+            # 入口自己那条不需要再附一行「上游正常」——它就是上游。它要附的是
+            # 降级诊断：坏到什么程度、下一步该去哪。
             messages.append(render.render_group(
                 group, enabled_mirrors=enabled_mirrors,
                 prefix=self.cfg.notify.prefix,
                 at_all=self.cfg.notify.at_all_on_p0,
-                upstream_line=attach))
+                upstream_line="" if is_entry else line,
+                extra_lines=list(extra_lines or []) if is_entry else None))
         return messages
 
     # ── 落盘 ────────────────────────────────────────────────
@@ -220,6 +293,10 @@ class Monitor:
         data["rotation"] = self.rotation.to_dict()
         data["ticker"] = self.ticker.to_dict()
         data["last_versions"] = dict(self.last_versions)
+        # 好配置也落盘：bot 重启后入口正好是挂的，没有它就连「线路是不是也挂了」
+        # 都答不上来——而那是重启后第一条告警最该回答的问题。
+        data["last_good_config"] = self.last_good_raw
+        data["last_good_at"] = self.last_good_at
         return data
 
     def restore(self, data: dict) -> None:
@@ -232,6 +309,32 @@ class Monitor:
         if isinstance(lv, dict):
             self.last_versions = {str(k): int(v) for k, v in lv.items()
                                   if str(v).lstrip("-").isdigit()}
+        good = data.get("last_good_config")
+        if isinstance(good, dict):
+            self.last_good_raw = good
+            try:
+                self.last_good_at = float(data.get("last_good_at") or 0.0)
+            except (TypeError, ValueError):
+                self.last_good_at = 0.0
+
+
+@dataclass
+class Degraded:
+    """降级诊断的产出：几条给人看的话 + 几条不判绿的探测结果。"""
+
+    lines: List[str] = field(default_factory=list)
+    results: List[ProbeResult] = field(default_factory=list)
+
+
+def _dumps(raw: dict) -> bytes:
+    import json
+    return json.dumps(raw).encode("utf-8")
+
+
+def _human_age(seconds: float) -> str:
+    if seconds < 5400:
+        return "%d 分钟" % int(seconds / 60)
+    return "%.1f 小时" % (seconds / 3600.0)
 
 
 def _majority_manifest(per_mirror: Dict[str, Dict[str, FileEntry]]
