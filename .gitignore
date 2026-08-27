@@ -1,0 +1,39 @@
+# ── 本地配置：绝不入库 ───────────────────────────────────────────────
+#
+# 本仓库的铁律 1：任何具体地址/凭证都不进版本库，运行时从本地配置 + 线上配置
+# 现场取（CLAUDE.md 铁律 1）。所以本地配置文件必须在这里挡住——一次手滑
+# `git add -A` 就足以把入口地址和推送凭证写进公开历史，而历史是擦不掉的。
+#
+# 入库的只有 *.example.* 样例，里面全是 example.test 占位符。
+# 只挡仓库根的这几个名字（前导 / 是必须的：不带斜杠的模式会连
+# .codex/config.toml 这种同名文件一起挡掉，而那是要入库的）
+/config.toml
+/config.json
+/config.yaml
+/config.yml
+config.local.*
+*.local.toml
+*.local.json
+!*.example.*
+
+# 运行期状态（故障状态机落盘、探针覆盖率进度）。可丢，丢了最多重报一次。
+data/
+state/
+*.state.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store
