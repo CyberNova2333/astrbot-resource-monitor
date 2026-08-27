@@ -87,10 +87,14 @@ class RuntimeConfig:
 
 @dataclass
 class LocalConfig:
-    # 第一条是**主入口**（客户端用的那个）。其余是备用出口：只在主入口失败时
-    # 试，用来判断「配置内容坏了」还是「这个出口挂了」。备用入口通不通都不影响
-    # 主入口那条 P0——客户端只认它自己那份地址。
-    entry_urls: List[str] = field(default_factory=list)
+    # 配置源规格（见 watch/sources.py）。两种：
+    #
+    #   {"type": "endpoint", "urls": [...]}   从 URL 拉一份含 mirrors 的 JSON；
+    #                                          第一条是主入口，其余是备用出口
+    #   {"type": "mirrors",  "mirrors": [...]} 线路表直接由本地配置给，无中心配置
+    #
+    # 监控**不绑定任何一份特定配置的形状**：源可以换，判据不变。
+    source: dict = field(default_factory=dict)
     notify: NotifyConfig = field(default_factory=NotifyConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     alert: AlertConfig = field(default_factory=AlertConfig)
@@ -98,12 +102,15 @@ class LocalConfig:
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
 
     @property
-    def entry_url(self) -> str:
-        return self.entry_urls[0]
+    def entry_urls(self) -> List[str]:
+        """endpoint 源的 URL 列表；别的源返回空。"""
+        urls = self.source.get("urls") or []
+        return [str(u) for u in urls]
 
     @property
-    def backup_entry_urls(self) -> List[str]:
-        return self.entry_urls[1:]
+    def entry_url(self) -> str:
+        urls = self.entry_urls
+        return urls[0] if urls else ""
 
     @property
     def state_path(self) -> str:
@@ -148,13 +155,96 @@ def validate_entry_url(url: str) -> str:
     """
     if not url or not isinstance(url, str):
         raise ConfigError(
-            "缺少 entry_url：线上配置的入口地址。它不入库，必须由部署侧给"
-            "（AstrBot 插件配置或本地 config.json）。形如 "
-            "https://api.example.test/path/to/config.json")
+            "没有配置源：监控不知道该探哪里。二选一，都由部署侧给（不入库）——\n"
+            "  1. 有一个能拉到线路表的地址："
+            "entry_url = https://api.example.test/path/to/lines.json\n"
+            "     （那份 JSON 只要有 mirrors[]，其余字段有就多探两样）\n"
+            "  2. 没有中心配置：source = {\"type\": \"mirrors\", "
+            "\"mirrors\": [{\"name\": \"甲\", \"base\": \"https://a.example.test/\"}]}")
     p = urlparse(url.strip())
     if p.scheme not in ("http", "https") or not p.netloc:
         raise ConfigError("entry_url 不是合法的 http(s) 地址：%r" % url)
     return url.strip()
+
+
+def _mirror_from_line(item) -> dict:
+    """`名称=https://…`、`https://…`、或者本来就是对象。"""
+    if isinstance(item, dict):
+        return item
+    text = str(item).strip()
+    if "=" in text and not text.split("=", 1)[0].strip().startswith("http"):
+        name, _, base = text.partition("=")
+        return {"name": name.strip(), "base": base.strip()}
+    return {"base": text}
+
+
+def normalize_source(data: dict) -> dict:
+    """把配置里的「探哪里」归一成一份源规格。
+
+    三种写法，前两种是同一件事的新旧说法：
+
+        {"source": {"type": "endpoint", "urls": [...]}}      ← 推荐
+        {"entry_url": "...", "entry_urls": [...]}            ← 旧写法，等价
+        {"source": {"type": "mirrors", "mirrors": [...]}}    ← 不依赖任何中心配置
+
+    **不给默认源**：没配就报错，不是悄悄用一个内置的。默认值在这件事上只会让
+    插件在一台没配好的机器上「跑起来」，群里一片绿而其实什么都没探。
+    """
+    spec = data.get("source")
+    if isinstance(spec, dict) and spec.get("type"):
+        kind = str(spec["type"]).strip().lower()
+        if kind in ("endpoint", "url", "config", "legacy-config"):
+            urls = spec.get("urls")
+            if isinstance(urls, str):
+                urls = [urls]
+            urls = [str(u).strip() for u in (urls or []) if str(u).strip()]
+            if not urls:
+                raise ConfigError("endpoint 源要给至少一个 urls")
+            return {"type": "endpoint", "urls": [validate_entry_url(u) for u in urls]}
+        if kind in ("mirrors", "static", "local"):
+            mirrors = []
+            for item in spec.get("mirrors") or []:
+                if not isinstance(item, dict):
+                    continue
+                base = str(item.get("base") or "").strip()
+                if not base.startswith(("http://", "https://")):
+                    raise ConfigError("mirrors 源里的 base 必须是 http(s) 地址：%r" % base)
+                mirrors.append({"name": str(item.get("name") or base), "base": base,
+                                "weight": int(item.get("weight") or 0),
+                                "chunks": int(item.get("chunks") or 0),
+                                "enabled": bool(item.get("enabled", True))})
+            if not mirrors:
+                raise ConfigError("mirrors 源要给至少一条线路")
+            packages = spec.get("packages")
+            return {"type": "mirrors", "mirrors": mirrors,
+                    "version_files": [str(x) for x in (spec.get("version_files") or [])],
+                    "packages": {str(k): str(v) for k, v in packages.items()}
+                    if isinstance(packages, dict) else {}}
+        raise ConfigError("不认识的配置源类型：%r（可用：endpoint / mirrors）"
+                          % spec.get("type"))
+
+    # WebUI 友好的写法：一行一条线路，`名称=地址` 或光给地址。
+    # AstrBot 的配置表单只能给字符串列表，表达不了对象列表——与其让人去改
+    # 本地 JSON 文件，不如把这种写法直接接住。
+    raw_mirrors = data.get("mirrors")
+    if isinstance(raw_mirrors, list) and raw_mirrors and not data.get("entry_url"):
+        return normalize_source({"source": {
+            "type": "mirrors",
+            "mirrors": [_mirror_from_line(x) for x in raw_mirrors],
+            "version_files": data.get("version_files") or [],
+            "packages": data.get("packages") or {}}})
+
+    raw_urls = data.get("entry_urls")
+    if isinstance(raw_urls, str):
+        raw_urls = [raw_urls]
+    urls = [str(u).strip() for u in (raw_urls or []) if str(u).strip()] \
+        if isinstance(raw_urls, list) else []
+    primary = _str(data, "entry_url")
+    if primary:
+        urls = [primary] + [u for u in urls if u != primary]
+    if not urls:
+        validate_entry_url("")                    # 抛出那条写得清楚的 ConfigError
+    return {"type": "endpoint", "urls": [validate_entry_url(u) for u in urls]}
 
 
 def from_mapping(data: dict) -> LocalConfig:
@@ -176,21 +266,10 @@ def from_mapping(data: dict) -> LocalConfig:
     alert_raw = _section(data, "alert")
     rt_raw = _section(data, "runtime")
 
-    raw_urls = data.get("entry_urls")
-    if isinstance(raw_urls, str):
-        raw_urls = [raw_urls]
-    if not isinstance(raw_urls, list):
-        raw_urls = []
-    urls = [_str({"u": u}, "u") for u in raw_urls]
-    primary = _str(data, "entry_url")
-    if primary:
-        urls = [primary] + [u for u in urls if u != primary]
-    if not urls:
-        validate_entry_url("")                    # 抛出那条写得清楚的 ConfigError
     degraded_raw = _section(data, "degraded")
 
     cfg = LocalConfig(
-        entry_urls=[validate_entry_url(u) for u in urls],
+        source=normalize_source(data),
         notify=NotifyConfig(
             sessions=sessions,
             at_all_on_p0=_bool(notify_raw, "at_all_on_p0", True),

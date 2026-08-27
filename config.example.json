@@ -2,7 +2,20 @@
   "schema": 1,
   "comment": "本地配置**样例**。真配置请命名为 config.json（已被 .gitignore 挡住）或直接填在 AstrBot 的插件配置里。这一层只放两种东西：一个入口地址，以及本机才知道的东西（通知会话、凭证、开关）。线路表、文件清单、超时与速率阈值一律不在这里——它们在线上配置里已经有一份，监控要用同一份（CLAUDE.md 铁律 2）。所有示例地址用 example.test：RFC 6761 保留域名，永远不会解析到真东西。",
 
-  "entry_url": "https://api.example.test/path/to/config.json",
+  "source_comment": "「探哪里」二选一。A：给一个能拉到线路表的地址（entry_url）——那份 JSON 只要有 mirrors[] 就能用，不必长成某一个客户端的配置的样子。B：直接给线路表（下面注释掉的 source 段），完全不依赖中心配置，代价是没有线上阈值、速率判据保持未判定。",
+
+  "entry_url": "https://api.example.test/path/to/lines.json",
+
+  "source_b_example": {
+    "type": "mirrors",
+    "mirrors": [
+      { "name": "线路甲", "base": "https://a.example.test/" },
+      { "name": "线路乙", "base": "https://b.example.test/" }
+    ],
+    "version_files": [],
+    "packages": {},
+    "comment": "把这一段改名成 \"source\" 并删掉上面的 entry_url，就是不依赖中心配置的模式。"
+  },
 
   "entry_urls": [],
   "entry_urls_comment": "备用入口（可选）：同一份配置的其它出口。只在主入口失败时试，用来区分「配置内容被人改坏了」和「这个出口挂了」——两者的处置方式一个是回滚、一个是找托管方。备用能拉到不会让主入口那条 P0 降级：客户端只认它自己那份地址。",

@@ -84,29 +84,15 @@ class ChunkProbeTest(unittest.TestCase):
         self.assertNotIn("cache-control", {k.lower() for k in headers})
 
 
-class EntryProbeTest(unittest.TestCase):
-    def test_unreachable_entry_is_p0(self):
-        client = FakeClient().fail("https://api.example.test/config.json")
-        result, cfg = run(probes.probe_entry(client, "https://api.example.test/config.json"))
-        self.assertFalse(result.ok)
-        self.assertIsNone(cfg)
-        self.assertEqual(result.severity, Severity.P0)
-
-    def test_ok(self):
-        client = FakeClient().json("https://api.example.test/config.json", {
-            "schema": 1,
-            "mirrors": [{"name": "甲", "base": "https://a.example.test/", "enabled": True}],
-        })
-        result, cfg = run(probes.probe_entry(client, "https://api.example.test/config.json"))
-        self.assertTrue(result.ok)
-        self.assertEqual(len(cfg.enabled_mirrors), 1)
-
-
 class SanityTest(unittest.TestCase):
+    """合理性判据吃的是 Discovered——换配置源这些一行都不用改。"""
+
     def _cfg(self, raw):
-        from watch.discovery import parse_online_config
         import json as _json
-        return parse_online_config(_json.dumps(raw).encode())
+        from watch.discovery import parse_online_config
+        from watch.sources import EndpointSource
+        return EndpointSource.to_discovered(
+            parse_online_config(_json.dumps(raw).encode()))
 
     def test_no_enabled_mirror_is_p0(self):
         cfg = self._cfg({"mirrors": [{"name": "甲", "base": "https://a.example.test/",

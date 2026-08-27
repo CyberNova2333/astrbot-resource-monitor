@@ -37,9 +37,10 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from . import discovery
 from .http import DigestResult, HttpClient, HttpError, HttpResponse, kbps
-from .models import FileEntry, Mirror, OnlineConfig, ProbeResult, Severity, VersionMeta
+from .models import FileEntry, Mirror, ProbeResult, Severity, VersionMeta
+from .sources import Discovered, KEY_SOURCE, PROBE_SOURCE
 
-PROBE_ENTRY = "线上配置可达性"
+PROBE_ENTRY = PROBE_SOURCE          # 兼容旧名
 PROBE_SANITY = "线上配置合理性"
 PROBE_MANIFEST = "清单可达性"
 PROBE_CHUNK = "块内容校验"
@@ -50,8 +51,8 @@ PROBE_CONSISTENCY = "线路一致性"
 PROBE_SPEED = "线路速率"
 PROBE_TLS = "证书有效期"
 
-# 抑制链的根：入口坏了，下面全部是必然结果，不单独报（铁律 6）
-KEY_ENTRY = "%s|%s" % (PROBE_ENTRY, "线上配置")
+# 抑制链的根：配置源坏了，下面全部是必然结果，不单独报（铁律 6）
+KEY_ENTRY = KEY_SOURCE
 
 CONTENT_RANGE = re.compile(r"^bytes\s+(\d+)-(\d+)/(\d+)$", re.I)
 
@@ -62,77 +63,13 @@ def manifest_key(mirror: Mirror) -> str:
 
 
 # ────────────────────────────────────────────────────────────────
-# 一、入口：线上配置
+# 一、配置源自身的合理性（拉到了，但内容合不合理）
+#
+# 「探哪里」由 watch/sources.py 回答，那一层之下判据不认识任何一份配置的形状。
+# 这里只吃 Discovered——所以换一种源（网页端将来暴露什么都行），下面一行不用改。
 # ────────────────────────────────────────────────────────────────
 
-async def probe_entry(client: HttpClient, entry_url: str
-                      ) -> Tuple[ProbeResult, Optional[OnlineConfig]]:
-    """拉线上配置。它是整条链的入口。
-
-    为什么它是 P0 且必须由外部监控来发现：**拉不到时客户端 fail-open**——回退到
-    内置默认线路继续跑，用户一点感觉都没有。等有人报「装不上」的时候，通常已经
-    过去很久了。
-    """
-    t0 = time.monotonic()
-    try:
-        cfg, resp = await discovery.fetch_online_config(client, entry_url)
-    except discovery.DiscoveryError as e:
-        # 两种坏法分开记：内容坏了要回滚，拉不到要找出口那边。
-        content = isinstance(e, discovery.ContentError)
-        return ProbeResult(
-            ok=False, probe=PROBE_ENTRY, target="线上配置",
-            detail=("内容坏了：%s" if content else "拉不到：%s") % e,
-            elapsed_ms=_ms(t0), severity=Severity.P0,
-            extra={"reason": "content" if content else "unreachable"}), None
-
-    enabled = cfg.enabled_mirrors
-    return ProbeResult(
-        ok=True, probe=PROBE_ENTRY, target="线上配置",
-        detail="OK，schema=%s，%d 条线路（%d 条启用），%d ms"
-               % (cfg.schema, len(cfg.mirrors), len(enabled), resp.elapsed_ms),
-        elapsed_ms=resp.elapsed_ms, severity=Severity.P0,
-        extra={"enabled": len(enabled), "total": len(cfg.mirrors)}), cfg
-
-
-async def probe_entry_backups(client: HttpClient, urls: Sequence[str]
-                              ) -> Tuple[List[str], Optional[OnlineConfig]]:
-    """主入口挂了以后，试一遍备用出口。返回 (给人看的几行, 拿到的配置)。
-
-    它不产生告警——**备用入口通不通都不改变主入口那条 P0**：客户端只认它自己
-    那份地址，备用能拉到并不代表用户没事。它回答的是另一个问题：坏的是内容
-    还是这个出口。这两件事的处置方式完全不同。
-    """
-    lines: List[str] = []
-    got: Optional[OnlineConfig] = None
-    for url in urls:
-        try:
-            cfg, _ = await discovery.fetch_online_config(client, url)
-        except discovery.ContentError as e:
-            lines.append("备用入口 %s：内容同样是坏的（%s）" % (_short(url), e))
-            continue
-        except discovery.DiscoveryError as e:
-            lines.append("备用入口 %s：也拉不到（%s）" % (_short(url), e))
-            continue
-        lines.append("备用入口 %s：正常，%d 条线路（%d 启用）"
-                     % (_short(url), len(cfg.mirrors), len(cfg.enabled_mirrors)))
-        got = got or cfg
-    if got is not None:
-        lines.append("→ 配置内容本身是好的，坏的是主入口那个出口")
-    elif lines:
-        lines.append("→ 备用出口也拿不到好配置，多半不是单个出口的问题")
-    return lines, got
-
-
-def _short(url: str) -> str:
-    """只留主机名：告警里给人认，不需要整条路径。"""
-    from urllib.parse import urlparse
-    try:
-        return urlparse(url).hostname or url
-    except ValueError:
-        return url
-
-
-def check_config_mutation(cfg: OnlineConfig, last_good: Optional[dict]
+def check_config_mutation(disc: Discovered, last_snapshot: Optional[dict]
                           ) -> List[ProbeResult]:
     """与上一次的好配置比：**这次改动是不是把自己打死了**。
 
@@ -140,13 +77,11 @@ def check_config_mutation(cfg: OnlineConfig, last_good: Optional[dict]
     会误报的配置守卫比没有守卫更糟——被误伤一次，人就再也不信这条告警了。
     """
     out: List[ProbeResult] = []
-    if not isinstance(last_good, dict):
+    prev = Discovered.from_snapshot(last_snapshot)
+    if prev is None:
         return out
 
-    prev = OnlineConfig(raw=last_good, mirrors=[])
-    prev_mirrors = [m for m in (last_good.get("mirrors") or [])
-                    if isinstance(m, dict) and m.get("enabled", True)]
-    now_count, prev_count = len(cfg.enabled_mirrors), len(prev_mirrors)
+    now_count, prev_count = len(disc.enabled_mirrors), len(prev.enabled_mirrors)
     if prev_count >= 2 and now_count * 2 <= prev_count:
         out.append(ProbeResult(
             ok=False, probe=PROBE_SANITY, target="线路表突变",
@@ -154,7 +89,7 @@ def check_config_mutation(cfg: OnlineConfig, last_good: Optional[dict]
                    "剩下的会被瞬间打满" % (prev_count, now_count),
             severity=Severity.P0, suppress_key=KEY_ENTRY))
 
-    if prev.settings and not cfg.settings:
+    if prev.settings and not disc.settings:
         out.append(ProbeResult(
             ok=False, probe=PROBE_SANITY, target="阈值段消失",
             detail="settings 段没了——客户端会退回内置默认值，实际行为与你以为的"
@@ -163,7 +98,7 @@ def check_config_mutation(cfg: OnlineConfig, last_good: Optional[dict]
     return out
 
 
-def check_config_sanity(cfg: OnlineConfig,
+def check_config_sanity(disc: Discovered,
                         last_client_version: Optional[str] = None) -> List[ProbeResult]:
     """线上配置的**合理性**——防「改配置把自己打死」。
 
@@ -173,20 +108,20 @@ def check_config_sanity(cfg: OnlineConfig,
     不存在的版本。
     """
     out: List[ProbeResult] = []
-    key = "线上配置"
-
-    enabled = cfg.enabled_mirrors
+    enabled = disc.enabled_mirrors
     out.append(ProbeResult(
         ok=bool(enabled), probe=PROBE_SANITY, target="启用的线路数",
         detail=("%d 条线路启用" % len(enabled)) if enabled
                else "一条启用的线路都没有——用户会全部退回内置默认线路",
         severity=Severity.P0, suppress_key=KEY_ENTRY))
 
-    ver = str(cfg.client.get("version") or "").strip()
+    ver = (disc.client_version or "").strip()
     if not ver:
+        # 源里没有版本闸门这个概念（比如线路表直接由本地配置给），不是故障——
+        # 少一样可探的东西而已。
         out.append(ProbeResult(
             ok=True, probe=PROBE_SANITY, target="版本闸门",
-            detail="配置未设版本闸门（客户端会跳过版本检查）",
+            detail="这个配置源没有版本闸门字段，跳过",
             severity=Severity.P1, unknown=True, suppress_key=KEY_ENTRY))
     else:
         shape_ok = bool(re.match(r"^\d+(\.\d+)*$", ver))
@@ -206,10 +141,8 @@ def check_config_sanity(cfg: OnlineConfig,
             detail=detail, severity=Severity.P0, suppress_key=KEY_ENTRY,
             extra={"version": ver}))
 
-    proxy = cfg.raw.get("proxy")
-    if isinstance(proxy, dict) and proxy.get("base"):
-        base = str(proxy.get("base"))
-        ok = base.endswith("/")
+    if disc.proxy_base:
+        ok = disc.proxy_base.endswith("/")
         out.append(ProbeResult(
             ok=ok, probe=PROBE_SANITY, target="代理前缀",
             detail="代理前缀正常" if ok else

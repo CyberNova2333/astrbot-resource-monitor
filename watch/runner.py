@@ -25,11 +25,12 @@ from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
-from . import discovery, probes, render
+from . import probes, render, sources
 from .config import LocalConfig
 from .http import HttpClient
-from .models import FileEntry, Mirror, OnlineConfig, ProbeResult, Severity
+from .models import FileEntry, Mirror, ProbeResult, Severity
 from .scheduler import CoverageReport, HotPackagePolicy, Rotation, Ticker
+from .sources import Discovered, Source
 from .state import AlertState
 
 NOTE_CLIENT_VERSION = "client_version"
@@ -40,7 +41,7 @@ NOTE_MIRROR_CURSOR = "mirror_cursor"
 class CycleOutcome:
     results: List[ProbeResult] = field(default_factory=list)
     messages: List[str] = field(default_factory=list)
-    config: Optional[OnlineConfig] = None
+    config: Optional[Discovered] = None
     entries: Dict[str, FileEntry] = field(default_factory=dict)
     coverage: Optional[CoverageReport] = None
 
@@ -49,9 +50,13 @@ class Monitor:
     def __init__(self, cfg: LocalConfig, client: HttpClient, *,
                  state: Optional[AlertState] = None,
                  rotation: Optional[Rotation] = None,
-                 ticker: Optional[Ticker] = None):
+                 ticker: Optional[Ticker] = None,
+                 source: Optional[Source] = None):
         self.cfg = cfg
         self.client = client
+        # 「探哪里」全部在这一层之下（watch/sources.py）。判据不认识任何一份
+        # 具体配置的形状——换源不改判据。
+        self.source = source or sources.build(cfg.source)
         self.state = state or AlertState(
             fire_after=cfg.alert.fire_after_failures,
             window=cfg.alert.fire_window,
@@ -66,7 +71,7 @@ class Monitor:
         self.last_results: List[ProbeResult] = []
         # 上一次拉到的**好**配置。只用来在入口挂掉时继续探（降级诊断），
         # **绝不用来判绿**——拿旧数字当判据就是铁律 2 说的漂移。
-        self.last_good_raw: Optional[dict] = None
+        self.last_good_snapshot: Optional[dict] = None
         self.last_good_at: float = 0.0
         # 最近一次拿到的清单：`/线路 覆盖率` 要拿它当分母，没有清单就说不出
         # 覆盖率（而不是报一个 0% 或 100%，那两个数都在骗人）。
@@ -78,9 +83,9 @@ class Monitor:
         now = now if now is not None else time.time()
         out = CycleOutcome()
 
-        entry_result, cfg = await probes.probe_entry(self.client, self.cfg.entry_url)
+        entry_result, disc = await self.source.discover(self.client)
         out.results.append(entry_result)
-        if cfg is None:
+        if disc is None:
             # 入口挂了：**不是就此收工**。这时候恰恰最需要信息——是配置内容被人
             # 改坏了，还是这个出口挂了？线路那边是不是也一起挂了？所以这里不判绿，
             # 但继续用能拿到的线索探一轮，把结论附在那条 P0 后面。
@@ -92,17 +97,16 @@ class Monitor:
             self.last_results = out.results
             return out
 
-        out.results.extend(probes.check_config_mutation(cfg, self.last_good_raw))
-        self.last_good_raw = cfg.raw
+        out.results.extend(probes.check_config_mutation(disc, self.last_good_snapshot))
+        self.last_good_snapshot = disc.snapshot()
         self.last_good_at = now
-        out.config = cfg
+        out.config = disc
         out.results.extend(probes.check_config_sanity(
-            cfg, self.state.note(NOTE_CLIENT_VERSION)))
-        ver = str(cfg.client.get("version") or "").strip()
-        if ver:
-            self.state.remember(NOTE_CLIENT_VERSION, ver)
+            disc, self.state.note(NOTE_CLIENT_VERSION)))
+        if disc.client_version:
+            self.state.remember(NOTE_CLIENT_VERSION, disc.client_version)
 
-        mirrors = [m for m in cfg.enabled_mirrors
+        mirrors = [m for m in disc.enabled_mirrors
                    if only_mirror is None or m.name == only_mirror]
         if only_mirror is not None and not mirrors:
             out.results.append(ProbeResult(
@@ -128,13 +132,13 @@ class Monitor:
             self.last_entries = reference
         if reference:
             self.rotation.prune(reference)
-            out.results.extend(await self._chunk_round(mirrors, reference, cfg, now))
+            out.results.extend(await self._chunk_round(mirrors, reference, disc, now))
             out.coverage = self.rotation.coverage(reference, now=now)
 
         if slow:
-            out.results.extend(await self._slow_round(cfg, mirrors, now))
+            out.results.extend(await self._slow_round(disc, mirrors, now))
 
-        out.messages = self._notify(out.results, enabled_mirrors=len(cfg.enabled_mirrors),
+        out.messages = self._notify(out.results, enabled_mirrors=len(disc.enabled_mirrors),
                                     now=now, entry_result=entry_result)
         self.last_results = out.results
         return out
@@ -156,15 +160,12 @@ class Monitor:
         比说错强**。
         """
         deg = Degraded()
-        if self.cfg.backup_entry_urls:
-            lines, _ = await probes.probe_entry_backups(
-                self.client, self.cfg.backup_entry_urls)
-            deg.lines.extend(lines)
+        deg.lines.extend(await self.source.diagnose(self.client))
 
         if not self.cfg.degraded.probe_with_stale_config:
             return deg
         age = now - self.last_good_at if self.last_good_at else None
-        if not self.last_good_raw or age is None:
+        if not self.last_good_snapshot or age is None:
             deg.lines.append("没有可用的旧线路表（这轮是第一次跑，或状态刚清过），"
                              "线路那边现在是什么状况说不出来")
             return deg
@@ -173,10 +174,8 @@ class Monitor:
                              "过期的线索会把人带偏" % (age / 3600.0))
             return deg
 
-        stale_cfg = OnlineConfig(raw=self.last_good_raw,
-                                 mirrors=discovery.parse_online_config(
-                                     _dumps(self.last_good_raw)).mirrors)
-        mirrors = stale_cfg.enabled_mirrors
+        stale = Discovered.from_snapshot(self.last_good_snapshot)
+        mirrors = stale.enabled_mirrors if stale else []
         if not mirrors:
             return deg
         alive = 0
@@ -199,7 +198,7 @@ class Monitor:
 
     # ── 抽样块 ──────────────────────────────────────────────
     async def _chunk_round(self, mirrors: Sequence[Mirror],
-                           entries: Dict[str, FileEntry], cfg: OnlineConfig,
+                           entries: Dict[str, FileEntry], disc: Discovered,
                            now: float) -> List[ProbeResult]:
         """每轮取 N 块，逐块换一条线路。
 
@@ -211,7 +210,7 @@ class Monitor:
             return out
         picks = self.rotation.plan(entries, self.cfg.schedule.chunk_probes_per_cycle)
         cursor = int(self.state.note(NOTE_MIRROR_CURSOR) or 0)
-        min_speed = cfg.threshold("min_speed_kbps")
+        min_speed = disc.threshold("min_speed_kbps")
         for entry, index in picks:
             mirror = mirrors[cursor % len(mirrors)]
             cursor += 1
@@ -228,14 +227,14 @@ class Monitor:
         return out
 
     # ── 慢周期 ──────────────────────────────────────────────
-    async def _slow_round(self, cfg: OnlineConfig, mirrors: Sequence[Mirror],
+    async def _slow_round(self, disc: Discovered, mirrors: Sequence[Mirror],
                           now: float) -> List[ProbeResult]:
         out: List[ProbeResult] = []
-        version_files = discovery.declared_version_files(cfg)
+        version_files = disc.version_files
         if not version_files:
             out.append(ProbeResult(
                 ok=True, probe=probes.PROBE_VERSION, target="热更",
-                detail="线上配置没有声明 watch.version_files，跳过热更相关探针"
+                detail="配置源没有声明要探哪些热更版本文件，跳过热更相关探针"
                        "（不知道该探什么时保持沉默，比拿一份猜的清单去报警好）",
                 unknown=True))
             return out
@@ -246,7 +245,7 @@ class Monitor:
                 out.append(result)
                 if meta is None or not meta.is_valid():
                     continue
-                package = discovery.declared_package_for(cfg, name)
+                package = disc.packages.get(name)
                 if not package:
                     continue
                 key = "%s|%s" % (mirror.name, package)
@@ -295,7 +294,7 @@ class Monitor:
         data["last_versions"] = dict(self.last_versions)
         # 好配置也落盘：bot 重启后入口正好是挂的，没有它就连「线路是不是也挂了」
         # 都答不上来——而那是重启后第一条告警最该回答的问题。
-        data["last_good_config"] = self.last_good_raw
+        data["last_good_config"] = self.last_good_snapshot
         data["last_good_at"] = self.last_good_at
         return data
 
@@ -311,7 +310,7 @@ class Monitor:
                                   if str(v).lstrip("-").isdigit()}
         good = data.get("last_good_config")
         if isinstance(good, dict):
-            self.last_good_raw = good
+            self.last_good_snapshot = good
             try:
                 self.last_good_at = float(data.get("last_good_at") or 0.0)
             except (TypeError, ValueError):
@@ -324,11 +323,6 @@ class Degraded:
 
     lines: List[str] = field(default_factory=list)
     results: List[ProbeResult] = field(default_factory=list)
-
-
-def _dumps(raw: dict) -> bytes:
-    import json
-    return json.dumps(raw).encode("utf-8")
 
 
 def _human_age(seconds: float) -> str:

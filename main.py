@@ -148,7 +148,8 @@ class ResourceWatch(Star):
         args = _args(event)
         sub = args[0] if args else "状态"
         if not self.monitor or not self.cfg:
-            yield event.plain_result("线路监控没有启动：配置里缺 entry_url，见日志。")
+            yield event.plain_result(
+                "线路监控没有启动：没有配置源（entry_url 或 mirrors 二选一），见日志。")
             return
 
         if sub in ("状态", "status"):
