@@ -3,10 +3,12 @@
 #   用法: resolve-private.py <name>...      name = 裸名(如 foo-bar) 或 owner/repo
 #   输出: 一行 JSON {name: {"status": private|public|absent|error, "owner": "..."}}；总是 exit 0，结果看 status。
 # 由 check.py --net 调用(git 钩子 / scan-repo)。Claude hook 路径不走网络，不会调用它。
-# 语义(与 refresh 一致，只读环境变量 GH_TOKEN_n):
+# 语义(与 refresh 一致，两条来源对等: 环境变量 GH_TOKEN_n 与 gh CLI):
 #   * 裸名对缓存/种子里的每个 owner 逐个查 GET /repos/{owner}/{name}；优先用 refresh 记录的"该 owner 对应的 token"。
 #   * 200 -> private/public；404/403 -> 该 token 看不到，换下一把；网络/5xx/超时 -> 重试 1 次后算 error。
-#   * 所有 token 都 404 -> absent(不是任何已知 owner 的私有仓 => 放行)。没有任何 token 且 gh 也失败 -> error(拦)。
+#   * **所有 token 都答不上来时再问 gh**(没有 token 时同样问)。token 与 gh 的可见范围不一定相同，
+#     所以 gh 不是"仅当没有 token 时"的兜底；漏判会导致私有仓名外泄，多判只是多拦一个名字。
+#   * token 与 gh 都说看不到 -> absent(不是任何已知 owner 的私有仓 => 放行)；有来源报错 -> error(拦)。
 #   * 结果写入 <private_cache>.resolve.json 负缓存: public/absent 24h，private 也 24h(下一次 refresh 会把它并进正式名单)。
 import sys, os, re, json, time, subprocess, urllib.request, urllib.error
 
@@ -88,7 +90,12 @@ def resolve_one(name, owners, toks, token_owners):
                 got = r; break
             if r == 'error':
                 any_error = True
-        if got is None and not toks:
+        if got is None:
+            # 没有 token，或者所有 token 都答不上来(全部 404/403 skip，或全部失败) —— 两种情况都要问 gh。
+            # gh 与 GH_TOKEN_n 是**对等来源**，不是"仅当一把 token 都没有时才用"的末位兜底：
+            # 某个 owner 的专属 PAT 看不见某个仓时，gh 当前登录身份仍可能看得见，
+            # 从前的 `not toks` 门控会让这种组合里的 gh 永远不被咨询，进而把私有仓判成 absent 放行。
+            # 取舍方向：多判成 private 只是多拦一个名字；判漏才会让私有仓名外泄。
             r = gh_api(o, repo)
             if r in ('private', 'public'):
                 got = r

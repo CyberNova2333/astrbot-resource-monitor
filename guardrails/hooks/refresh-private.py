@@ -17,6 +17,11 @@
 #   * policy.expected_owners 里的每个 owner 必须被"种子覆盖"或"gh/token 看到了它至少 1 个私有仓"，否则视为不完整、
 #     不回写。(HTTP 200 不算覆盖: 无权限时 orgs/{o}/repos 返回 200+仅公开仓；云环境 GitHub 代理也只放挂载仓。)
 #     某 owner 确实 0 个私有仓 => 把它写进种子的 owners 即可。
+#   * expected_owners 为空时上面那条恒真，所以额外要求: 空 expected_owners + 一个私有仓都没看到 => 判定为来源不可信，
+#     同样不回写。否则会写出空名单并报成功，R1 静默放行一切(fail open)。
+#
+# 注意 patterns(R4 业务标识正则)只能来自私有种子: gh 与 GH_TOKEN_n 都提供不了这类信息。
+# 没有种子时 patterns 为空 => R4 整条规则不生效，仅靠 R1 挡私有仓名。
 #
 # rev4 修复: 去掉写死的私有仓名种子; gh --jq 输出裸字符串(非 JSON)导致 me 永远取不到; user/repos 只翻第 1 页;
 #            user/repos 返回的组织仓被错记到 username 下; 路径全部来自 policy.json(bootstrap 只需改写 policy.json)。
@@ -223,6 +228,13 @@ if not sources:
 missing = sorted(EXPECTED - covered)
 if missing:
     fail('以下 owner 未被任何来源覆盖(种子未列出, gh/token 也没看到它的任何私有仓): %s => 名单不完整，不回写' % ', '.join(missing))
+# expected_owners 没配时上面那道校验恒真(空集合减任何东西都是空)，于是"一个私有仓都没看到"会被当成成功，
+# 写出 private:[] 的缓存 => R1 静默放行一切。这与本包"守卫自身判断失败 = fail closed"的原则相反，
+# 而"确实没有私有仓"和"scope 不足 / 被代理过滤 / 登录态失效"从结果上无法区分，只能保守当作后者。
+# 确实一个私有仓都没有的部署：把 owner 写进私有种子的 owners(或 policy.expected_owners)即可通过。
+if not EXPECTED and not priv:
+    fail('policy.expected_owners 未配置，且没有从任何来源看到私有仓 —— 无法区分"确实没有"与"权限不足/被过滤"。'
+         '不回写(否则会写出空名单，R1 会静默放行一切)。请配置 expected_owners，或在私有种子里列出 owners/private')
 
 now = time.time()
 os.makedirs(os.path.dirname(CACHE), exist_ok=True)

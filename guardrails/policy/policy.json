@@ -61,5 +61,11 @@
   "expected_owners": [],
   "resolve_script": "/root/.claude/hooks/resolve-private.py",
   "resolve_budget": 30,
-  "resolve_cache_ttl": 86400
+  "resolve_cache_ttl": 86400,
+
+  "_expected_owners_note": "expected_owners 必须在部署时按实际情况填写(本文件随 CDN 分发，不能带具体 owner 名，所以这里留空)。留空的后果: refresh-private.py 的完整性校验 EXPECTED-covered 恒真,若 gh/token 因 scope 不足只看得到公开仓,就会写出 private:[] 的空名单并报成功,R1 于是静默放行一切。rev4.1 起 refresh 对『空 expected_owners + 没看到任何私有仓』额外判失败以兜底,但那只是保险,正确做法仍是在部署时填上本项(或在私有种子 private-seed.json 里列出 owners)。",
+
+  "_patterns_note": "R4 业务标识(域名/内部流水线名)正则只能来自本机私有种子 private-seed.json 的 patterns 字段——gh 与 GH_TOKEN_n 都提供不了这类信息。没有种子文件时 patterns 为空,R4 整条规则不生效,只剩 R1 挡私有仓名。要 R4 就必须部署种子。",
+
+  "_sources_note": "私有仓名单的两条来源(gh CLI 与环境变量 GH_TOKEN_n)是对等的,不是主备关系:两者可见范围可能不同,任一单独可用即可工作。resolve-private.py 在所有 token 都答不上来时也会问 gh(rev4.1 修正,此前仅在完全没有 token 时才问 gh)。"
 }
