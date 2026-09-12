@@ -1,29 +1,26 @@
-// token-helper.cpp —— 把 Token 直接焊在二进制里(无额外配置文件)。
-// 用法: token-helper get <NAME>   —— 打印 NAME 对应的 token(供护栏 hook 内部使用)
-//        token-helper has <NAME>   —— 0/1 是否存在(非空)
-// 安全: 编译产物 token-helper 设 root:root 700; 值不进入会话/transcript(由调用方 hook 保证)。
-// 你把各 GH_TOKEN_n 的真值填进下面 TOKENS 数组，然后重新 g++ 编译即可。
-#include <cstdio>
-#include <cstring>
+// token-helper.cpp —— 护栏运行时凭据数据源(模板)。
+//
+// 用法:
+//   把各 GH_TOKEN_n(只读细粒度)的真值填进下方 TOKENS 的 value 字段;
+//   PKG_URL_DEFAULT 为公开护栏产物 URL,通常无需改动。
+//   填好后用同级 build-secure-token.py 生成「密文化」最终源码,再交叉编成 x86-64 ELF:
+//     python3 build-secure-token.py token-helper.cpp secure-token-helper.cpp
+//     x86_64-linux-gnu-g++ -O2 -o token-helper.x64 secure-token-helper.cpp && chmod 700 token-helper.x64
+//
+// 产出的 ELF 安全属性:
+//   - 值以 XOR 流式密文存二进制,运行时仅在内存解密后调用 setenv;
+//   - 无论带不带参数都【绝不打印值】:带参数 → 刻写环境变量后 exec 该命令(值只在子进程环境);
+//     不带参数 → 只输出固定确认语;
+//   - 目的:防止 Claude Code 云对上传文件的自动读取把可用值拉进训练数据(密文非明文即挡),
+//     属混淆级,非抗定向逆向;若需真正抗逆向,应改为机器侧注入、代码只读环境变量名。
+//
+// 说明:本文件为【数据源模板】,不含 main()/打印逻辑;运行时 main 由 build-secure-token.py 生成。
 struct Token { const char* name; const char* value; };
-// —— 手动填写区：把每把 Metadata 只读细粒度 token 填到对应 value，类型保留原名 ——
 static const Token TOKENS[] = {
-  {"GH_TOKEN_1", ""},   // e.g. "github_pat_xxxxxxx"  配置源 1
-  {"GH_TOKEN_2", ""},   // 配置源 2
-  {"GH_TOKEN_3", ""},   // 所有者3(CyberNova2333 个人)
+  {"GH_TOKEN_1", ""},   // 所有者1
+  {"GH_TOKEN_2", ""},   // 所有者2
+  {"GH_TOKEN_3", ""},   // 所有者3
   {"GH_TOKEN",   ""},   // 兜底(可选)
+  {"PKG_URL_DEFAULT", ""},   // 公开产物 URL；构建时由 build-secure-token.py 从 $GUARD_PKG_URL 注入，不在此写死
   {nullptr, nullptr}
 };
-// —— 填写区结束 ——
-static const char* find(const char* name){
-  for(int i=0; TOKENS[i].name; ++i)
-    if(!strcmp(TOKENS[i].name,name)) return TOKENS[i].value;
-  return nullptr;
-}
-int main(int argc,char** argv){
-  if(argc<3 || (strcmp(argv[1],"get")&&strcmp(argv[1],"has"))){fprintf(stderr,"usage: token-helper get|has <NAME>\n");return 2;}
-  const char* v=find(argv[2]);
-  int ok=(v&&v[0]);
-  if(strcmp(argv[1],"get")==0){ if(ok) printf("%s",v); }
-  return ok?0:1;
-}

@@ -45,6 +45,12 @@
         "hooks": [
           { "type": "command", "command": "bash /root/.claude/hooks/forbid-tamper.sh", "timeout": 30 }
         ]
+      },
+      {
+        "matcher": "Read|Grep",
+        "hooks": [
+          { "type": "command", "command": "bash /root/.claude/hooks/forbid-read-path.sh", "timeout": 30 }
+        ]
       }
     ],
     "SessionStart": [

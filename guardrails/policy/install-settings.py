@@ -26,6 +26,7 @@ HOOKS = {
     {"matcher": "Bash", "hooks": [dict(cmd("forbid-push.sh"), **{"if": "Bash(git *)"})]},
     {"matcher": "Bash", "hooks": [cmd("forbid-read-secret.sh", 30)]},
     {"matcher": "Bash", "hooks": [cmd("forbid-tamper.sh", 30)]},
+    {"matcher": "Read|Grep", "hooks": [cmd("forbid-read-path.sh", 30)]},
   ],
   "SessionStart": [
     {"hooks": [{"type": "command", "command": "python3 %s/refresh-private.py" % H, "timeout": 120,

@@ -62,6 +62,10 @@
   "resolve_script": "/root/.claude/hooks/resolve-private.py",
   "resolve_budget": 30,
   "resolve_cache_ttl": 86400,
+  "cnb_api": "https://api.cnb.cool",
+  "cnb_token_file": "/root/.cnb-auth-token",
+
+  "_cnb_note": "第三条名单来源: CNB(云原生构建)平台。cnb_token_file 指向本机令牌文件(不随包分发, 格式为一行 `Token: <值>`), 或用环境变量 CNB_TOKEN。文件存在即启用并必须成功(语义同 GH_TOKEN_n); 不存在即跳过。resolve-private.py 只向 refresh 成功过的来源(缓存 sources 字段)提问: GitHub 登录态失效时 gh/token 不会再被咨询, 由 CNB 单独作答, 不会因为一家平台哑火而把所有推送拦死。",
 
   "_expected_owners_note": "expected_owners 必须在部署时按实际情况填写(本文件随 CDN 分发，不能带具体 owner 名，所以这里留空)。留空的后果: refresh-private.py 的完整性校验 EXPECTED-covered 恒真,若 gh/token 因 scope 不足只看得到公开仓,就会写出 private:[] 的空名单并报成功,R1 于是静默放行一切。rev4.1 起 refresh 对『空 expected_owners + 没看到任何私有仓』额外判失败以兜底,但那只是保险,正确做法仍是在部署时填上本项(或在私有种子 private-seed.json 里列出 owners)。",
 
