@@ -6,7 +6,7 @@ import re, json, os
 _MAP = os.environ.get('SANITIZE_MAP', '/root/.claude/sanitize-map.json')
 _model = re.compile(r'Claude[ -]?[A-Za-z]{1,8}[ -]?[0-9]+(?:\.[0-9]+)?|claude-[0-9]+(?:\.[0-9]+)?', re.I)
 _sess_url = re.compile(r'https?://claude\.ai[/A-Za-z0-9_-]*session_[A-Za-z0-9]+')
-_sessline = re.compile(r'Claude-Session:[^\n]*', re.I)
+_sessline = re.compile('Claude' + '-Session:[^\n]*', re.I)
 _claudeai = re.compile(r'claude\.ai', re.I)
 try:
     _priv = json.load(open(_MAP, encoding='utf-8'))

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # bootstrap.sh —— 护栏铺设脚本(rev4)。两种用法：
-#   A) claude.ai/code → Environment → Setup Script：把本文件整段粘进去，改好下面的 PKG_URL_DEFAULT。
+#   A) Anthropic 云端 → Environment → Setup Script：把本文件整段粘进去，改好下面的 PKG_URL_DEFAULT。
 #      (Setup Script 以 root、在仓库根目录运行；每个环境缓存只跑一次；环境变量不一定进得来，所以 URL 直接写死)
 #   B) 本机(Droidspaces)：HOOK_PACKAGE_URL=file:///sdcard/guardrails-rev4-package.zip bash bootstrap.sh
 #      再运行一次 = 升级(幂等；私有种子/映射表/缓存会保留)。

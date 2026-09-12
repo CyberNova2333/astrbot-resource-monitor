@@ -57,7 +57,7 @@ def all_tokens():
         if v and v not in [t for _, t in toks]:
             toks.append((k, v))
     t = os.environ.get('GH_TOKEN', '').strip()
-    if t and t != 'proxy-injected' and t not in [x for _, x in toks]:   # claude.ai 云环境的占位符不是可用 token
+    if t and t != 'proxy-injected' and t not in [x for _, x in toks]:   # Anthropic 云端 云环境的占位符不是可用 token
         toks.append(('GH_TOKEN', t))
     return toks
 

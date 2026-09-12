@@ -8,7 +8,7 @@
 # rev4: 补上旧版漏掉的 forbid-read-secret.sh(旧版只装了 3 个，shipped settings.json 有 4 个)；新增 forbid-tamper.sh；
 #       Write|Edit 扩到 NotebookEdit；`if` 放宽为 Bash(git *)(if 是 best-effort 过滤，脚本内部再精确判断)；
 #       hook timeout 120s(Claude hook 路径已不联网，120s 只是给大文件正则扫描留余量；hook 超时 = 无决策 = 放行，timeout 必须大于内部最慢路径)。
-# 注意: Anthropic 托管的 claude.ai 云会话**不读** ~/.claude/settings.json(只读仓库 .claude/settings.json 与组织托管设置)，
+# 注意: Anthropic 托管的 Anthropic 云端 云会话**不读** ~/.claude/settings.json(只读仓库 .claude/settings.json 与组织托管设置)，
 #       本脚本只对本机 CLI 部署有效。云部署见 README「需你决定」#1。
 import json, os, sys, subprocess
 ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
