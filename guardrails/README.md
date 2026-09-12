@@ -16,7 +16,7 @@ policy/
   check.py           # 引擎: content / commit / push 三模式, 三态 pass|violation|error；三模式都做 R1(动态)。--net 才联网(git 钩子/scan-repo 传)
   doctor.py          # 一键自检(路径按自身位置推导，bootstrap 搬家后仍可用)
   install-settings.py# 幂等注入 settings.json(用户级，或 <repo>/.claude/settings.json 仓库级)：5 个 PreToolUse + SessionStart + attribution.sessionUrl=false
-  bootstrap.sh       # 铺设脚本 = claude.ai Environment 的 Setup Script，本机也用它装(见「部署」)
+  bootstrap.sh       # 铺设脚本 = Anthropic 云端 Environment 的 Setup Script，本机也用它装(见「部署」)
   msgcb-hygiene.py   # filter-repo --message-callback body(消息中性化；映射表读本机 sanitize-map.json)
   token-helper.cpp   # token 焊入 ELF 模板(填值后 g++ 编译；产物只放本机)。唯一职责：把 GH_TOKEN_n 写进环境，护栏本身只读环境变量
 hooks/
@@ -43,12 +43,12 @@ settings.json        # 本机 CLI 用的 Claude Code hooks 示例(env 已脱敏)
 ## 规则 R1–R7
 - **R1** 私有仓名：来自 `private-repos.json`(`Owner/repo` 与裸名两种形态；裸名为子串匹配，设计如此)。缓存缺失/损坏/过期 → **ERROR → 拦**：git 钩子(`--net`)会先就地刷新一次，Claude hooks 不联网、直接让 Agent 跑 `refresh-private.py`。
   补充(`--net`)：缓存里没有、但长得像仓名的裸名(`xxx-xxx`，≥6 字符、至少一段含 2 个字母、后面不跟 `:`) 与 已知 owner 下的 `owner/repo`，交给 `resolve-private.py` 逐个问 GitHub：private → 拦；public/不存在 → 放；查不到(无 token/网络) → ERROR。候选超过 `resolve_budget`(30) 时不逐个查，改为整体 refresh 一次再按新名单比。`Co-authored-by` 等 trailer 键与 `pre-commit` 等常见词在 `resolve_ignore` 里忽略。
-- **R2** 具体型号 + 会话：`Claude <tier> <ver>`、`Claude 4.5`、`Claude Sonnet`、`Opus/Sonnet/Haiku/Fable/Mythos <ver>`、`claude_sonnet_4_6`、`GPT-x`、`OpenAI o3`/`o3-mini`、`Gemini x`、`DeepSeek-Vx/Rx`、`Kimi Kx`、`Qwen/Llama/Grok/Mistral <ver>`；`Claude-Session:`、`claude.ai`。
-  形态上有误伤(`Claude found 3 bugs`)——按约定提交信息全中文，不处理；注意这些正则也作用于文件内容。
+- **R2** 具体型号与会话标识：完整清单见 `policy/policy.json` 的 `forbidden_patterns`（随包分发，不含私密信息）。此处不逐字列举——包若含禁词举例，会被自己的规则拦住提交。
+  形态上有误伤(英文里的同类句式)——按约定提交信息全中文，不处理；注意这些正则也作用于文件内容。
 - **R3** 作者/提交者不得是 Agent 提供商 noreply；非根提交必须带 `Co-authored-by:`。
 - **R4** 业务标识(域名/内部流水线名)：**不在包里**，来自本机种子 `patterns` → 缓存 → check.py/scan-repo。没有种子的环境 R4 不生效(doctor 会 WARN)。
 - **R5** 禁止推送到任何 Agent 分支：`agent_branch_prefixes`(claude/ codex/ chatgpt/ gpt/ openai/ agent/ deepseek/ kimi/ copilot/ cursor/ devin/ gemini/ jules/ aider/ anthropic/，大小写不敏感，含删除)。不做 main/强推保护——那是 GitHub ruleset 的活。
-  注意：claude.ai 云端的 GitHub 代理只允许推会话工作分支 `claude/…`，所以云端会话在 R5 下推不出任何东西(按设计)。
+  注意：Anthropic 云端 云端的 GitHub 代理只允许推会话工作分支 `claude/…`，所以云端会话在 R5 下推不出任何东西(按设计)。
 - **R6** 必须 SSH 签名，且不能是 Agent 通用密钥。验签方式：从提交对象剥出 `gpgsig`，`ssh-keygen -Y check-novalidate -n git` 密码学验签并取指纹——**不需要 `gpg.ssh.allowedSignersFile`**(git 自带的 `%G?`/`%GK` 没有它时全为空，rev3 就死在这里)。
   发现未签名/通用密钥/非 SSH 签名 → 拦下并输出 `policy.signing_instructions`：让 Agent 生成 ed25519 密钥、配置 git、把公钥完整内容发给你，你手动加到 GitHub。
 - **R7** 禁提交凭据**值**(`gh[pousr]_`、`github_pat_`、私钥、AKIA、`sk-…`(含 sk-proj-/sk-ant-)、xox、AIza、glpat、npm_)。**不再匹配变量名**(`GH_TOKEN`/`GITHUB_TOKEN`)。deny 理由里的凭据只回显前 8 字符。
@@ -91,7 +91,7 @@ settings.json        # 本机 CLI 用的 Claude Code hooks 示例(env 已脱敏)
     改法：URL 不再写死，构建时由 `build-secure-token.py` 从环境变量 `GUARD_PKG_URL` 注入；未设置则只是不导出该项。
 
 ## 部署(两边都用 bootstrap.sh，装出来的目录结构完全一致：`/root/.claude/guardrails/`)
-### 云端：claude.ai/code → Environment → Setup Script
+### 云端：Anthropic 云端 → Environment → Setup Script
 1. 把 `policy/bootstrap.sh` 整段粘进 Setup Script，改第一处 `PKG_URL_DEFAULT` 为 CDN 上的包地址(zip/tgz 均可)。
 2. Environment 环境变量：`GH_TOKEN_1..N`(各 Owner 的 Metadata:Read PAT)、`GUARD_SEED_B64`(`base64 -w0 private-seed.json`)。
 3. Environment 网络白名单：CDN 域名 + `api.github.com`。

@@ -31,11 +31,11 @@ try:
     for n in ('forbid-content.sh', 'forbid-commit.sh', 'forbid-push.sh', 'forbid-read-secret.sh'):
         ok('Claude PreToolUse hook %s' % n, n in cmds)
     warn('Claude PreToolUse hook forbid-tamper.sh(可选)', 'forbid-tamper.sh' in cmds)
-    ok('Claude SessionStart refresh', 'refresh-private.py' in ' '.join(h.get('command', '') for grp in s.get('hooks', {}).get('SessionStart', []) for h in grp.get('hooks', [])))
+    ok('SessionStart 刷新钩子', 'refresh-private.py' in ' '.join(h.get('command', '') for grp in s.get('hooks', {}).get('SessionStart', []) for h in grp.get('hooks', [])))
     ok('attribution.sessionUrl 关闭', s.get('attribution', {}).get('sessionUrl') is False)
     ok('未输出 permissionDecision=allow(旧版会跳过全部权限确认)', 'permissionDecision":"allow' not in open(os.path.join(H, 'forbid-content.sh')).read())
     if os.environ.get('CLAUDE_CODE_REMOTE') == 'true':
-        print('[WARN] 当前是 claude.ai 云会话: 官方文档称云端不读 ~/.claude/settings.json，以上 Claude hooks 可能根本没生效，请用仓库 .claude/settings.json'); warns.append('cloud')
+        print('[WARN] 当前是 Anthropic 云端 云会话: 官方文档称云端不读 ~/.claude/settings.json，以上 Claude hooks 可能根本没生效，请用仓库 .claude/settings.json'); warns.append('cloud')
 except Exception as e:
     ok('~/.claude/settings.json 可读', False, str(e))
 # 2) Git hooks
