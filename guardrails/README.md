@@ -26,8 +26,8 @@ hooks/
   forbid-push.sh     # git … push: 拦推向 Agent 分支(含 `push -u origin claude/x` 形态) + --no-verify
   forbid-read-secret.sh  # 拦"读 token/打 token 到会话"(提醒级)
   forbid-tamper.sh   # (新增, 可选) 拦改 core.hooksPath/disableAllHooks/删改护栏目录与 settings.json
-  refresh-private.py # 私有仓并集: 种子(owners/private/patterns) + gh + 环境变量 GH_TOKEN_n，owner 覆盖校验，原子写缓存
-  resolve-private.py # R1 补充: 对缓存里没有的 xxx-xxx 裸名 / 已知 owner 下的 owner/repo 单名查询(由 check.py --net 调用; 负缓存 24h)
+  refresh-private.py # 私有仓并集: 种子(owners/private/patterns) + gh + 环境变量 GH_TOKEN_n + CNB 平台(policy.cnb_token_file 或 CNB_TOKEN)，owner 覆盖校验，原子写缓存
+  resolve-private.py # R1 补充: 对缓存里没有的 xxx-xxx 裸名 / 已知 owner 下的 owner/repo 单名查询(由 check.py --net 调用; 负缓存 24h)。只问 refresh 成功过的来源(缓存 sources)
   scan-repo.py       # 存量审计(HEAD 树 + 全历史消息；--scan-history 全历史树)；R1 同样读动态缓存
 hooks/git/           # Git 层强制执行(只调 check.py)
   pre-commit / pre-merge-commit / commit-msg / pre-push
@@ -69,6 +69,27 @@ settings.json        # 本机 CLI 用的 Claude Code hooks 示例(env 已脱敏)
 13. 删除 check.py 里无人调用的 `tokens()/get_token()`；commit 模式先剥 `core.commentChar` 注释行。
 14. **按你的决定**：R4 业务标识全部出包进种子；R5 = 禁推一切 Agent 分支、不做 main/强推保护；#8 resolve-private 接入(xxx-xxx 形态)；#10-1 pre-push 扫新提交内容(cherry-pick/rebase/am/合并/--no-verify 进来的内容在这里兜底，实测)；#10-2 TTL 6h + Claude hook 路径永不联网(过期直接 ERROR 并给出刷新命令)；R6 改为 check-novalidate 验签 + 签名指引文案(policy.signing_instructions)；R7 去掉变量名匹配、补 `sk-proj-/sk-ant-/ghu_/ghr_/glpat/npm_`；R2 补漏的型号；token 只从环境变量 `GH_TOKEN_n` 读(不再调用 token-helper get)。
 
+## rev4.1 相对 rev4 的改动
+
+15. **补上 Read/Grep 的凭据读取缺口（rev4 实测发现）**：`forbid-read-secret.sh` 只解析 Bash 的
+    `tool_input.command`，而 Claude 的 Read / Grep 工具走 `tool_input.file_path` / `tool_input.path`。
+    于是同一个动作换个工具就绕过：`cat /root/.claude/settings.json` 被拦，`Read /root/.claude/settings.json` 放行。
+    新增 `hooks/forbid-read-path.sh` + matcher `Read|Grep` 补齐这一半。
+    * **必须是新文件名**：`install-settings.py` 的去重按**脚本文件名**判定，复用
+      `forbid-read-secret.sh` 会被判「已装」而跳过注入，缺口照旧。
+    * 覆盖 Read 与 Grep（两者都能把文件**内容**带回会话）；**Glob 不覆盖**——它只回文件名不回内容。
+    * 路径先 `realpath` 归一化再匹配，防 `../` 与软链绕过；白名单放行 `*.pub` / `known_hosts` /
+      `.ssh/config` / `authorized_keys`，避免 rev4 改动 11 反对的那类过度拦截。
+    * `_lib.sh` **未改动**（新 hook 自带 JSON 解析，不调用只认 `command` 的 `get_cmd()`），影响面仅限新增文件。
+
+16. **私有仓名出包（rev4 漏网）**：`policy/token-helper.cpp` 与 `policy/build-secure-token.py` 里各硬编码了一次发布地址
+    `https://github.com/<owner>/<repo>/releases/download/...`，而该仓是**私有**的。
+    后果有两个，rev4 都没覆盖到：
+    * 破坏「包内不含私有仓名、可放 CDN」的前提——真发到 CDN 就泄露了；doctor 只检查 `policy.json` 一项，查不到这里。
+    * **自指死结**：护栏自己的 R1 会拦住任何把新版包提交进仓库的提交（`私有仓名: <本仓名>`），
+      导致各仓 vendor 的 `guardrails/` 从引入该 URL 起就**再也同步不了**。
+    改法：URL 不再写死，构建时由 `build-secure-token.py` 从环境变量 `GUARD_PKG_URL` 注入；未设置则只是不导出该项。
+
 ## 部署(两边都用 bootstrap.sh，装出来的目录结构完全一致：`/root/.claude/guardrails/`)
 ### 云端：claude.ai/code → Environment → Setup Script
 1. 把 `policy/bootstrap.sh` 整段粘进 Setup Script，改第一处 `PKG_URL_DEFAULT` 为 CDN 上的包地址(zip/tgz 均可)。
@@ -82,6 +103,8 @@ settings.json        # 本机 CLI 用的 Claude Code hooks 示例(env 已脱敏)
 HOOK_PACKAGE_URL=file:///sdcard/guardrails-rev4-package.zip bash bootstrap.sh     # 再跑一次 = 升级(种子/映射/缓存保留)
 cp private-seed.json sanitize-map.json /root/.claude/guardrails/ && chmod 600 /root/.claude/guardrails/{private-seed.json,sanitize-map.json}
 g++ -O2 -o /root/.claude/guardrails/token-helper policy/token-helper.cpp   # 先手填 token；chmod 700；由它把 GH_TOKEN_1..N 写进 Claude Code 的环境
+# 产物 URL 不写死在包里：构建时用 GUARD_PKG_URL 注入（build-secure-token.py 读它）；不设则只是不导出 PKG_URL_DEFAULT
+#   例：GUARD_PKG_URL=https://<你的发布地址>/guardrails-rev4-package.zip python3 policy/build-secure-token.py policy/token-helper.cpp /tmp/gen.cpp
 apt-get install -y openssh-client                                            # ssh-keygen 是 R6 验签的硬依赖
 python3 /root/.claude/guardrails/hooks/refresh-private.py && python3 /root/.claude/guardrails/policy/doctor.py
 ```
