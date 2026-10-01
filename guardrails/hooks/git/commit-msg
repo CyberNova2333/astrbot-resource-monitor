@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # git commit-msg — 消息策略(引擎)：命中禁止词/私有仓名/作者为Agent/缺Co-authored 即拒。ERROR 亦拒(fail closed)。
+export PYTHONUTF8=1   # 中文 Windows / GBK 区域设置下让 python3 统一按 UTF-8 读写（标准流、open、子进程输出）
 set -uo pipefail
 msgfile="$1"
 tmp=$(mktemp); resf=$(mktemp); trap 'rm -f "$tmp" "$resf"' EXIT

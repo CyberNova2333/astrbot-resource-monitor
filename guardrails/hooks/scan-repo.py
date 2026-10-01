@@ -8,6 +8,11 @@
 #   * 不再按扩展名白名单挑文件(漏 .gitmodules/Dockerfile/无扩展名文件)，改为二进制嗅探(前 8KB 含 NUL 即跳过)。
 #   * 命中里的凭据脱敏，不把 token 打进终端/会话。
 import sys, os, re, json, subprocess, time
+# 中文 Windows / GBK 区域设置下 Python 默认按本地编码读写标准流：统一走 UTF-8，
+# 否则读到的中文会乱码或抛错（抛错多半落进 fail-open 分支），输出 ✘ 等字符也会崩。
+for _s in (sys.stdin, sys.stdout, sys.stderr):
+    if hasattr(_s, 'reconfigure'):
+        _s.reconfigure(encoding='utf-8', errors='replace')
 P_PATH = '/root/.claude/policy/policy.json'
 P = json.load(open(P_PATH, encoding='utf-8'))
 RX = re.compile('|'.join(P['forbidden_patterns']), re.I)

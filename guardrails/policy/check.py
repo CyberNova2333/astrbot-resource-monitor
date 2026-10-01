@@ -22,7 +22,17 @@
 #     `ssh-keygen -Y check-novalidate` 做密码学验签并取出签名密钥指纹(git 的 %G?/%GK 没有 allowedSigners 时全是空)。
 #   * push 模式也扫新提交的**内容**(新增行)：cherry-pick/rebase/am/合并/--no-verify 进来的内容在这里兜底。
 #   * R1 补充(--net)：缓存里没有的 xxx-xxx 裸名交给 resolve-private.py 单名查询；未知名过多时改为整体 refresh 一次再比。
+# rev4.2 变更:
+#   * push 模式的"重签豁免"：待推提交的 patch-id(--stable)若等于远端已有某提交的 patch-id，
+#     说明内容改动逐字节等于远端本来就有的，只是换了签名/committer/父提交——不再重扫其新增行；
+#     消息、签名、作者/提交者邮箱照查。远端"已有"以 --net 下 ls-remote 的真实顶点为准(本地 refs/remotes 可被伪造)，
+#     无网络退回本地跟踪 ref。算不出 patch-id 就退化为全扫，绝不因此放行。policy.resign_exempt=false 可整体关闭。
 import sys, os, json, re, subprocess, time, tempfile
+# 中文 Windows / GBK 区域设置下 Python 默认按本地编码读写标准流：统一走 UTF-8，
+# 否则读到的中文会乱码或抛错（抛错多半落进 fail-open 分支），输出 ✘ 等字符也会崩。
+for _s in (sys.stdin, sys.stdout, sys.stderr):
+    if hasattr(_s, 'reconfigure'):
+        _s.reconfigure(encoding='utf-8', errors='replace')
 
 POLICY_PATH = '/root/.claude/policy/policy.json'
 POLICY = json.load(open(POLICY_PATH, encoding='utf-8'))
@@ -66,10 +76,28 @@ def mask(s):
     return s
 
 
+RX_B64CHAR = re.compile(r'[A-Za-z0-9+/]')
+
+
+def in_b64_run(text, a, b, minlen=24):
+    """命中 [a,b) 是否整个落在一段 ≥minlen、无分隔符、大小写与数字混杂的 base64 形态串里
+    (JSON 里内嵌的图片/音频等编码数据)。真实型号名不会有 24 个以上连续字母数字且没有任何分隔符。
+    只用于 R2 型号/会话规则；R7 凭据规则不走这里(凭据本身就是这种形态)。"""
+    i, j = a, b
+    while i > 0 and RX_B64CHAR.match(text[i - 1]):
+        i -= 1
+    while j < len(text) and RX_B64CHAR.match(text[j]):
+        j += 1
+    run = text[i:j]
+    return len(run) >= minlen and bool(re.search(r'[a-z]', run) and re.search(r'[A-Z]', run) and re.search(r'[0-9]', run))
+
+
 def scan(text):
     """R2/R4/R7: 静态正则(不含私有仓名)。"""
     hits = set()
     for m in FORBIDDEN.finditer(text):
+        if in_b64_run(text, m.start(), m.end()):
+            continue
         hits.add(mask(m.group(0)))
     for r in SECRETS:
         for m in r.finditer(text):
@@ -196,7 +224,7 @@ def resolve_unknown(text, d, priv):
         hits = [p for p in priv2 - priv if p and p in low]
         return (VIOLATION, ['私有仓名(刷新后新增): ' + hits[0]]) if hits else (PASS, [])
     try:
-        r = subprocess.run([sys.executable, RESOLVE, *cands], capture_output=True, text=True, timeout=120)
+        r = subprocess.run([sys.executable, RESOLVE, *cands], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=120)
         res = json.loads(r.stdout.strip() or '{}')
     except Exception as e:
         return ERROR, ['resolve-private 调用失败(%s)' % type(e).__name__]
@@ -221,7 +249,7 @@ def full_check(text):
 def git(args, cwd=None, timeout=60):
     """返回 (ok, stdout)。任何异常都算失败，交给调用方保守处理。"""
     try:
-        r = subprocess.run(['git', *args], capture_output=True, text=True, timeout=timeout, cwd=cwd)
+        r = subprocess.run(['git', *args], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout, cwd=cwd)
         return r.returncode == 0, r.stdout
     except Exception:
         return False, ''
@@ -305,8 +333,13 @@ def cmd_commit(msgfile=None, cwd=None):
     return PASS, []
 
 
-def new_commits(lsha, rsha, remote, cwd):
-    """要审的提交 = 本地要推的 tip 减去远端已有的。优先用远端跟踪分支排除(覆盖新分支/远端 SHA 本地不可见)。"""
+def new_commits(lsha, rsha, remote, cwd, tips=()):
+    """要审的提交 = 本地要推的 tip 减去远端已有的。rev4.2：优先按远端真实顶点(ls-remote)排除；
+    其次远端跟踪分支(覆盖新分支/远端 SHA 本地不可见)。"""
+    if tips:
+        ok, out = git(['rev-list', lsha, '--not', *tips], cwd, 300)
+        if ok:
+            return out.splitlines()
     if remote:
         ok, out = git(['rev-list', lsha, '--not', '--remotes=' + remote], cwd, 300)
         if ok:
@@ -317,6 +350,95 @@ def new_commits(lsha, rsha, remote, cwd):
             return out.splitlines()
     ok, out = git(['rev-list', lsha], cwd, 300)          # 兜底: 全量(保守)
     return out.splitlines() if ok else None
+
+
+def remote_tips(remote, cwd):
+    """远端真实的 ref 顶点。--net 时问远端本身(ls-remote)，本地 refs/remotes/* 是可以被随手 update-ref 伪造的；
+    无网络时退回本地跟踪 ref。只保留本地已有的对象(算 patch-id 要读得到)。"""
+    shas = []
+    if NET:
+        ok, out = git(['ls-remote', '--heads', '--tags', remote], cwd, 120)
+        if ok:
+            shas = [l.split()[0] for l in out.splitlines() if l.strip() and not l.endswith('^{}')]
+    if not shas:
+        ok, out = git(['for-each-ref', '--format=%(objectname)', 'refs/remotes/' + remote], cwd, 30)
+        shas = out.split() if ok else []
+    have = []
+    for s in shas:
+        ok, _ = git(['cat-file', '-e', s + '^{commit}'], cwd, 10)
+        if ok:
+            have.append(s)
+    return have
+
+
+def commit_index(revs_args, cwd):
+    """{sha: (tree, parents, author_time)}。只读提交头，不碰 blob——远端历史就算缺 blob(部分克隆/不完整镜像)也能算。"""
+    ok, out = git(['log', '--format=%H %T %at %P', *revs_args], cwd, 300)
+    if not ok:
+        return None
+    idx = {}
+    for l in out.splitlines():
+        p = l.split()
+        if len(p) >= 3:
+            idx[p[0]] = (p[1], tuple(p[3:]), p[2])
+    return idx
+
+
+def patch_id(sha, cwd, cache):
+    """单个提交的 patch-id(--stable：与行号/hunk 顺序无关；默认忽略空白——空白加不出泄露内容)。
+    合并提交按 -m 对每个父分别比。算不出(缺 blob 等) => None，只影响这一个提交。"""
+    if sha in cache:
+        return cache[sha]
+    pid = None
+    try:
+        d = subprocess.run(['git', 'diff-tree', '-r', '-m', '-p', '--no-color', sha], cwd=cwd, capture_output=True, timeout=300)
+        if d.returncode == 0 and d.stdout.strip():
+            r = subprocess.run(['git', 'patch-id', '--stable'], cwd=cwd, input=d.stdout, capture_output=True, timeout=300)
+            if r.returncode == 0 and r.stdout.split():
+                pid = r.stdout.split()[0].decode('ascii', 'replace')
+    except Exception:
+        pid = None
+    cache[sha] = pid
+    return pid
+
+
+def known_content(tips, lsha, cwd):
+    """重签豁免(rev4.2)：待推提交若与远端已有某个提交"内容改动完全相同"，说明只是换了签名/committer/父提交
+    (整仓重签、rebase、原样 cherry-pick)——这种提交不再重扫新增行(消息、签名、作者/提交者邮箱照查)。
+    判定二选一，任一成立即豁免：
+      a) 树签名相同：(tree, 各父提交的 tree) 逐一相等 => diff 必然相同，且完全不用读 blob；
+      b) patch-id 相同：只对作者时间相同的远端候选逐个算(diff-tree)，单个算不出就不豁免该提交。
+    返回豁免的待推提交集合；任何环节失败都只是"不豁免"，绝不因此放行。"""
+    if not tips or not POLICY.get('resign_exempt', True):
+        return set()
+    remote = commit_index([*tips], cwd)
+    mine = commit_index([lsha, '--not', *tips], cwd)
+    if not remote or not mine:
+        return set()
+    tree_of = {s: v[0] for s, v in remote.items()}
+    tree_of.update({s: v[0] for s, v in mine.items()})
+
+    def sig(tree, parents):
+        pts = tuple(tree_of.get(p) for p in parents)
+        return None if None in pts else (tree, pts)
+    rsigs, by_time = set(), {}
+    for s, (tree, parents, at) in remote.items():
+        g = sig(tree, parents)
+        if g:
+            rsigs.add(g)
+        by_time.setdefault(at, []).append(s)
+    cache, exempt = {}, set()
+    for s, (tree, parents, at) in mine.items():
+        g = sig(tree, parents)
+        if g and g in rsigs:
+            exempt.add(s); continue
+        cands = by_time.get(at, [])
+        if not cands:
+            continue
+        mp = patch_id(s, cwd, cache)
+        if mp and any(patch_id(c, cwd, cache) == mp for c in cands):
+            exempt.add(s)
+    return exempt
 
 
 def cmd_push(remote=None, cwd=None):
@@ -331,9 +453,11 @@ def cmd_push(remote=None, cwd=None):
                 return VIOLATION, ['R5: 禁止推送到 Agent 分支 %s。请用中性分支名(或按约定直推 main)。' % rref]
         if lsha == ZERO:
             continue                                      # 删除远端分支
-        commits = new_commits(lsha, rsha, remote, cwd)
+        tips = remote_tips(remote, cwd) if remote else []
+        commits = new_commits(lsha, rsha, remote, cwd, tips)
         if commits is None:
             return ERROR, ['无法枚举待推送提交(git rev-list 失败)']
+        exempt = known_content(tips, lsha, cwd)
         for c in commits:
             c = c.strip()
             if not c:
@@ -358,6 +482,8 @@ def cmd_push(remote=None, cwd=None):
                 return res, ['提交 %s: %s' % (c[:9], ' '.join(note[:4]))]
             if is_provider(ae) or is_provider(ce):
                 return VIOLATION, ['提交作者/提交者是 Agent noreply: ' + c[:9]]
+            if c in exempt:
+                continue                                  # 内容改动与远端已有提交完全相同(纯重签/换父)，不算新内容
             ok, added = added_lines(c, cwd)
             if not ok:
                 return ERROR, ['无法读取提交 %s 的内容差异' % c[:9]]

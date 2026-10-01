@@ -11,6 +11,11 @@
 # 注意: Anthropic 托管的 Anthropic 云端 云会话**不读** ~/.claude/settings.json(只读仓库 .claude/settings.json 与组织托管设置)，
 #       本脚本只对本机 CLI 部署有效。云部署见 README「需你决定」#1。
 import json, os, sys, subprocess
+# 中文 Windows / GBK 区域设置下 Python 默认按本地编码读写标准流：统一走 UTF-8，
+# 否则读到的中文会乱码或抛错（抛错多半落进 fail-open 分支），输出 ✘ 等字符也会崩。
+for _s in (sys.stdin, sys.stdout, sys.stderr):
+    if hasattr(_s, 'reconfigure'):
+        _s.reconfigure(encoding='utf-8', errors='replace')
 ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
 SET = os.path.abspath(ARGS[0]) if ARGS else os.path.expanduser('~/.claude/settings.json')
 EXCLUDE_UNTRACKED = '--exclude-untracked' in sys.argv
@@ -55,7 +60,7 @@ def git_exclude_if_untracked(path):
     """仓库级文件未被跟踪时写进 .git/info/exclude(本地忽略，不进提交)。"""
     d = os.path.dirname(path)
     try:
-        top = subprocess.run(['git', '-C', d, 'rev-parse', '--show-toplevel'], capture_output=True, text=True, timeout=10)
+        top = subprocess.run(['git', '-C', d, 'rev-parse', '--show-toplevel'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=10)
         if top.returncode != 0:
             return
         top = top.stdout.strip()
@@ -63,7 +68,7 @@ def git_exclude_if_untracked(path):
                                  capture_output=True, timeout=10).returncode == 0
         if tracked:
             return
-        gitdir = subprocess.run(['git', '-C', top, 'rev-parse', '--git-path', 'info/exclude'], capture_output=True, text=True, timeout=10).stdout.strip()
+        gitdir = subprocess.run(['git', '-C', top, 'rev-parse', '--git-path', 'info/exclude'], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=10).stdout.strip()
         excl = os.path.join(top, gitdir) if not os.path.isabs(gitdir) else gitdir
         rel = '/' + os.path.relpath(path, top).replace(os.sep, '/')
         os.makedirs(os.path.dirname(excl), exist_ok=True)

@@ -34,6 +34,11 @@
 # rev4 修复: 去掉写死的私有仓名种子; gh --jq 输出裸字符串(非 JSON)导致 me 永远取不到; user/repos 只翻第 1 页;
 #            user/repos 返回的组织仓被错记到 username 下; 路径全部来自 policy.json(bootstrap 只需改写 policy.json)。
 import json, subprocess, os, sys, re, urllib.request, urllib.error, time
+# 中文 Windows / GBK 区域设置下 Python 默认按本地编码读写标准流：统一走 UTF-8，
+# 否则读到的中文会乱码或抛错（抛错多半落进 fail-open 分支），输出 ✘ 等字符也会崩。
+for _s in (sys.stdin, sys.stdout, sys.stderr):
+    if hasattr(_s, 'reconfigure'):
+        _s.reconfigure(encoding='utf-8', errors='replace')
 
 # GUARD_POLICY 只为沙盒测试而设: 指向一份临时 policy(临时缓存路径/临时种子)，就能在不碰安装目录的前提下
 # 验证来源枚举与解析逻辑。生产路径不设它，永远读安装目录里那份。
@@ -111,7 +116,7 @@ def api_pages(path, tok):
 # ---------- gh CLI (best-effort) ----------
 def gh_raw(args, timeout=40):
     try:
-        r = subprocess.run(['gh', 'api', *args], capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(['gh', 'api', *args], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=timeout)
         return r.stdout if r.returncode == 0 else None
     except Exception:
         return None

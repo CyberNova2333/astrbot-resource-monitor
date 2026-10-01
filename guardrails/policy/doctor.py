@@ -3,6 +3,11 @@
 # rev4: 路径从本文件位置推导(bootstrap 搬家后仍可用); 检查 token-helper / 私有种子 / read-secret & tamper hooks /
 #       gpg.ssh.allowedSignersFile(没有它 git 把 SSH 签名当成未签名) / 仓库级 core.hooksPath 覆盖 / 缓存来源。
 import json, os, sys, subprocess, time
+# 中文 Windows / GBK 区域设置下 Python 默认按本地编码读写标准流：统一走 UTF-8，
+# 否则读到的中文会乱码或抛错（抛错多半落进 fail-open 分支），输出 ✘ 等字符也会崩。
+for _s in (sys.stdin, sys.stdout, sys.stderr):
+    if hasattr(_s, 'reconfigure'):
+        _s.reconfigure(encoding='utf-8', errors='replace')
 P = os.path.dirname(os.path.abspath(__file__)); BASE = os.path.dirname(P)
 H = os.path.join(BASE, 'hooks'); G = os.path.join(H, 'git')
 fails, warns = [], []
@@ -13,7 +18,7 @@ def warn(name, cond, why=''):
     if not cond: print('[WARN] ' + name + (' — ' + why if why else '')); warns.append(name)
 def exe(p): return os.path.isfile(p) and os.access(p, os.X_OK)
 def sh(*a):
-    try: return subprocess.run(list(a), capture_output=True, text=True, timeout=20).stdout.strip()
+    try: return subprocess.run(list(a), capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=20).stdout.strip()
     except Exception: return ''
 
 pol = {}
@@ -33,7 +38,7 @@ try:
     warn('Claude PreToolUse hook forbid-tamper.sh(可选)', 'forbid-tamper.sh' in cmds)
     ok('SessionStart 刷新钩子', 'refresh-private.py' in ' '.join(h.get('command', '') for grp in s.get('hooks', {}).get('SessionStart', []) for h in grp.get('hooks', [])))
     ok('attribution.sessionUrl 关闭', s.get('attribution', {}).get('sessionUrl') is False)
-    ok('未输出 permissionDecision=allow(旧版会跳过全部权限确认)', 'permissionDecision":"allow' not in open(os.path.join(H, 'forbid-content.sh')).read())
+    ok('未输出 permissionDecision=allow(旧版会跳过全部权限确认)', 'permissionDecision":"allow' not in open(os.path.join(H, 'forbid-content.sh'), encoding='utf-8').read())
     if os.environ.get('CLAUDE_CODE_REMOTE') == 'true':
         print('[WARN] 当前是 Anthropic 云端 云会话: 官方文档称云端不读 ~/.claude/settings.json，以上 Claude hooks 可能根本没生效，请用仓库 .claude/settings.json'); warns.append('cloud')
 except Exception as e:

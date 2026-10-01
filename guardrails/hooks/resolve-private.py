@@ -17,6 +17,11 @@
 #   * 被问到的来源都说看不到 -> absent(不是任何已知 owner 的私有仓 => 放行)；有来源报错 -> error(拦)。
 #   * 结果写入 <private_cache>.resolve.json 负缓存: public/absent 24h，private 也 24h(下一次 refresh 会把它并进正式名单)。
 import sys, os, re, json, time, subprocess, urllib.request, urllib.error
+# 中文 Windows / GBK 区域设置下 Python 默认按本地编码读写标准流：统一走 UTF-8，
+# 否则读到的中文会乱码或抛错（抛错多半落进 fail-open 分支），输出 ✘ 等字符也会崩。
+for _s in (sys.stdin, sys.stdout, sys.stderr):
+    if hasattr(_s, 'reconfigure'):
+        _s.reconfigure(encoding='utf-8', errors='replace')
 
 POLICY = json.load(open(os.environ.get('GUARD_POLICY') or '/root/.claude/policy/policy.json', encoding='utf-8'))   # GUARD_POLICY 仅供沙盒测试
 CACHE = POLICY['private_cache']; NEG = CACHE + '.resolve.json'
@@ -83,7 +88,7 @@ def api(owner, repo, tok):
 def gh_api(owner, repo):
     try:
         r = subprocess.run(['gh', 'api', 'repos/%s/%s' % (owner, repo), '--jq', '.private'],
-                           capture_output=True, text=True, timeout=8)
+                           capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=8)
         if r.returncode == 0 and r.stdout.strip() in ('true', 'false'):
             return 'private' if r.stdout.strip() == 'true' else 'public'
         if r.returncode != 0 and ('404' in r.stderr or 'Not Found' in r.stderr):
@@ -102,6 +107,8 @@ def cnb_api(group_path, repo, tok):
                                                   'User-Agent': 'resolve-private'})
             with urllib.request.urlopen(req, timeout=PER_CALL_TIMEOUT) as resp:
                 d = json.load(resp)
+                if not isinstance(d, dict) or not ('visibility_level' in d or 'visibility' in d):
+                    return 'skip'          # 同一路径也可能是子组织(响应没有 visibility_level)：组织名不是仓名，不算私有仓
                 vis = str(d.get('visibility_level') or d.get('visibility') or '')
                 return 'public' if vis.lower() == 'public' else 'private'
         except urllib.error.HTTPError as e:

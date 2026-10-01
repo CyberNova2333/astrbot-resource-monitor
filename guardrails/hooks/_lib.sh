@@ -4,6 +4,7 @@
 #   * 放行 = "不表态": exit 0 且不输出。旧版输出 permissionDecision=allow，等于给 Bash/Write/Edit 全部跳过权限确认。
 #   * 拦截 = 输出 permissionDecision=deny 的 JSON **并且** exit 2 (exit 2 单独也能拦，双保险；
 #     hook 被 Claude Code 超时掐掉 = 无决策 = 放行，所以 hook 内不能做慢操作: 这里调用 check.py 一律**不带 --net**)。
+export PYTHONUTF8=1   # 中文 Windows / GBK 区域设置下让 python3 统一按 UTF-8 读写（标准流、open、子进程输出）
 POLICY=/root/.claude/policy/policy.json
 CHECK=/root/.claude/policy/check.py
 pass(){ exit 0; }
