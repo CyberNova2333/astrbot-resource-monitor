@@ -3,6 +3,7 @@
 # rev4: 只扫"新增行 + 涉及路径"(旧版把被删除的行也扫了 => 清理违规词的提交永远提交不上);
 #       Agent 通用密钥用 ssh-keygen 算 user.signingkey 的真实指纹再比(旧版拿指纹去 grep 公钥文本，永远比不中);
 #       指纹从 policy.json 读，单一来源。
+export PYTHONUTF8=1   # 中文 Windows / GBK 区域设置下让 python3 统一按 UTF-8 读写（标准流、open、子进程输出）
 set -uo pipefail
 POLICY=/root/.claude/policy/policy.json
 CHECK=/root/.claude/policy/check.py

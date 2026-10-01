@@ -20,6 +20,7 @@
 # 云端环境还需要在 Environment 设置里配：
 #   环境变量  GH_TOKEN_1..N = 各 Owner 的 Metadata:Read PAT； GUARD_SEED_B64 = `base64 -w0 private-seed.json`(owners/private/patterns)
 #   网络白名单  CDN 域名 + api.github.com (refresh/resolve 直连 GitHub API)
+export PYTHONUTF8=1   # 中文 Windows / GBK 区域设置下让 python3 统一按 UTF-8 读写（标准流、open、子进程输出）
 set -u
 # >>>>>>>>>>>>>>>>>>>>>>>>  改这一行：CDN 上的包地址(.zip 或 .tgz)  <<<<<<<<<<<<<<<<<<<<<<<<
 PKG_URL_DEFAULT="https://YOUR-CDN.example/guardrails-rev4-package.zip"

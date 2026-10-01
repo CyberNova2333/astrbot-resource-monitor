@@ -122,3 +122,15 @@ python3 /root/.claude/guardrails/hooks/refresh-private.py && python3 /root/.clau
 - 云端：Environment Setup Script = bootstrap.sh；Claude 层走仓库级 `.claude/settings.json`(幂等、去重、未跟踪即 exclude)；名单来源 = `GH_TOKEN_n` + `GUARD_SEED_B64`。`expected_owners` 因此不需要填(种子里的 owners 就是覆盖声明)。
 - 护栏目录/`settings.json` 写入不再豁免，和普通文件一样扫(含规则词的 README 会被拦)。
 - 放行 = 不表态，本机恢复正常权限弹窗；Claude hooks 不联网(缓存过期直接拦并给刷新命令；未知裸名只在 git 层查)。
+
+## rev4.2 相对 rev4.1 的改动
+1. **pre-push 重签豁免**：待推提交若与远端已有某个提交"内容改动完全相同"——只是换了签名 / committer / 父提交（整仓 SSH 重签、rebase、原样 cherry-pick）——不再重扫其新增行；**消息、签名、作者/提交者邮箱照查**。判定二选一：(a) 树签名相同，即 `(tree, 各父提交的 tree)` 逐一相等 ⇒ diff 必然相同，且完全不读 blob（远端历史缺 blob 的不完整镜像也能判）；(b) `git patch-id --stable` 相同，只对作者时间相同的远端候选逐个算 `diff-tree`，单个算不出就不豁免那一个。背景：迁移到新平台后整仓重签，重写后的历史对远端而言全是"新提交"，历史上早已放行的旧内容会被今天的规则整体重审而永久卡死。任何环节失败都只是"不豁免"，绝不因此放行。`policy.resign_exempt=false` 可整体关闭。
+2. **远端"已有"不再只信本地 `refs/remotes/*`**：`--net` 下以 `git ls-remote` 拿到的真实顶点为准（本地跟踪 ref 一条 `update-ref` 就能伪造成"远端已有"，rev4 的 `--not --remotes=` 也有此问题，一并改为优先用真实顶点）；无网络退回本地跟踪 ref（git 钩子总是带 `--net`）。
+3. **R2 型号规则跳过 base64 编码串**：命中若整个落在一段 ≥24 字符、无分隔符、大小写与数字混杂的串里（JSON 内嵌的图片/音频数据），视为编码数据不算命中。真实型号名从不会有 24 个以上连续字母数字且没有任何分隔符——带连字符/点号的长型号名照样命中。R7 凭据规则不走这条。
+4. **R7 的 Google API key 形态收紧为固定 39 位**（`AIza` + 35 位，前后不能再接同类字符）：原 `{30,}` 会把 base64 里任意 `AIza…` 片段整段吞掉。
+
+## rev4.3 相对 rev4.2 的改动
+1. **中文 Windows / GBK 区域设置下的编码问题**：Python 在这类环境里默认按本地编码（GBK）读写标准流、`open()` 与子进程输出，而 git、gh、Claude Code 给的都是 UTF-8。后果是读到的中文乱码或直接抛 `UnicodeDecodeError`——不少调用点把异常当成「查不到」处理，于是**静默放行**；输出 `✘` 等 GBK 里没有的字符则直接崩溃。实测：内联 `json.load(open(policy.json))` 在 GBK 环境下抛错，`pre-commit` 随即退回兜底值，签名指纹变成空串。修法分三层：
+   - 所有 shell 入口（`_lib.sh`、`commit-msg` / `pre-commit` / `pre-push`、`bootstrap.sh`）导出 `PYTHONUTF8=1`，内联 `python3 -c` 一并生效；
+   - 每个 Python 入口脚本启动时把 stdin / stdout / stderr 统一设为 UTF-8，父子进程之间的管道两端编码一致；
+   - `subprocess.run(text=True)` 一律显式 `encoding='utf-8', errors='replace'`，`open()` 显式 `encoding='utf-8'`——脚本被单独运行时也不依赖环境变量。
