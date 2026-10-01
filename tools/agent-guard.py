@@ -53,6 +53,12 @@ import shlex
 import subprocess
 import sys
 
+# 中文 Windows 下 Python 默认按 GBK 读写标准流，而 Claude Code 收发的都是 UTF-8：
+# 不统一的话，命令里一有中文就解析失败、落进下面的放行分支。
+for _s in (sys.stdin, sys.stdout, sys.stderr):
+    if hasattr(_s, "reconfigure"):
+        _s.reconfigure(encoding="utf-8", errors="replace")
+
 HOOKS_DIR = "tools/githooks"
 # commit 的 -n 是 --no-verify，可以并进组合短选项（-an）。
 # push 的 -n 是 --dry-run，无害，所以只在 commit 上认 -n。
@@ -107,7 +113,7 @@ def offending(cmd):
 
 
 def git(*args, **kw):
-    return subprocess.run(["git", *args], capture_output=True, text=True,
+    return subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8", errors="replace",
                           timeout=10, **kw)
 
 
@@ -149,7 +155,7 @@ def ensure_hooks_path(cwd):
 
 def main():
     try:
-        data = json.loads(sys.stdin.read())
+        data = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
     except Exception:
         return 0
     cmd = ((data.get("tool_input") or {}).get("command") or "")
