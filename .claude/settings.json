@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'p=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}/tools/agent-guard.py\"; [ -f \"$p\" ] || exit 0; exec python3 \"$p\"'"
+            "command": "sh -c 'p=\"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null)}/tools/agent-guard.py\"; [ -f \"$p\" ] || exit 0; for c in python3 python \"py -3\"; do $c -c \"import sys; sys.exit(sys.version_info[0] != 3)\" </dev/null >/dev/null 2>&1 && exec $c \"$p\"; done; exit 0'"
           }
         ]
       }

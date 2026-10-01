@@ -90,7 +90,7 @@ ENDPOINT_GUARD = "tools/check-no-endpoints.py"
 
 
 def sh(*a, **kw):
-    return subprocess.run(a, capture_output=True, text=True, timeout=120, **kw)
+    return subprocess.run(a, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120, **kw)
 
 
 def parse_stdin():
