@@ -71,15 +71,20 @@ if os.path.isfile(cache):
         ok('policy.json 不含缓存里的 R4 业务标识正则', not leak2, '泄露: %s' % ', '.join(map(str, leak2[:5])))
         warn('缓存含 R4 业务标识 patterns(来自种子)', len(d.get('patterns', [])) > 0, '为空 = R4 未生效(本机需要种子里的 patterns)')
         src = d.get('sources', [])
-        warn('缓存来源含 GitHub 实时数据(gh/token)', any(x != 'seed' for x in src), '当前来源=%s，仅种子 = 名单不会随新建私有仓更新' % '+'.join(src))
+        warn('缓存来源含平台实时数据(cnb/gh/token)', any(x not in ('seed', 'seed-env') for x in src), '当前来源=%s，仅种子 = 名单不会随新建私有仓更新' % '+'.join(src))
     except Exception as e:
         ok('私有仓缓存解析', False, str(e))
 else:
     ok('私有仓缓存存在', False, '缺失，请运行 refresh-private.py')
 seed = pol.get('private_seed', '')
-warn('私有种子存在(本机)', os.path.isfile(seed), '%s 不存在: 名单完全依赖 gh/token' % seed)
+warn('私有种子存在(本机)', os.path.isfile(seed), '%s 不存在: 名单完全依赖平台来源(cnb/gh/token)' % seed)
+# CNB 是名单主来源；GitHub(GH_TOKEN_n/gh)是可选来源，没配不算问题
+cnb_file = pol.get('cnb_token_file', '')
+has_cnb = bool(os.environ.get('CNB_TOKEN', '').strip()) or bool(cnb_file and os.path.isfile(cnb_file))
+warn('配置了 CNB 令牌(环境变量 CNB_TOKEN 或 %s)' % cnb_file, has_cnb, '没有 CNB 令牌 —— 名单只能靠 种子/GitHub，CNB 上新建的私有仓不会进名单；token-helper 未把 CNB_TOKEN 写进环境？')
 ntok = len([k for k in os.environ if k.startswith('GH_TOKEN_')])
-warn('环境里有 GH_TOKEN_n(各 Owner 的 Metadata:Read PAT)', ntok > 0, '当前进程环境里没有 GH_TOKEN_1..N —— token-helper 未把 PAT 写进环境？名单只能靠 种子/gh')
+if ntok == 0:
+    print('[INFO] 环境里没有 GH_TOKEN_n：GitHub 是可选来源，只在仍有私有仓托管在 GitHub 时才需要配置')
 # 4) 签名
 gs = sh('git', 'config', '--get', 'commit.gpgsign'); ff = sh('git', 'config', '--get', 'gpg.format')
 ok('SSH 签名配置(commit.gpgsign=true,gpg.format=ssh)', gs == 'true' and ff == 'ssh', 'gpgsign=%s format=%s' % (gs, ff))

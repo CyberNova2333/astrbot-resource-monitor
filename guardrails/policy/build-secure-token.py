@@ -18,7 +18,7 @@ raw = open(SRC, "r", encoding="utf-8", errors="replace").read()
 pattern = re.compile(r'\{\s*"([^"]+)"\s*,\s*"([^"]*)"\s*\}\s*,')
 pairs = pattern.findall(raw)
 
-# 取所有非空项(含 GH_TOKEN_* 与 PKG_URL_DEFAULT 这类 CDN URL)
+# 取所有非空项(含 CNB_TOKEN、GH_TOKEN_* 与 PKG_URL_DEFAULT 这类 CDN URL)
 nonempty = [(n, v) for (n, v) in pairs if v]
 # 公开产物 URL(非密钥)。构建时从环境变量 GUARD_PKG_URL 注入,**不写死在包里**——
 # 写死会把发布地址(含私有仓名)带进随包分发的文件:既破坏「包内不含私有仓名、可放 CDN」的前提,
@@ -29,7 +29,8 @@ if DEFAULT_PKG_URL and not any(n == "PKG_URL_DEFAULT" for n, _ in nonempty):
     nonempty.append(("PKG_URL_DEFAULT", DEFAULT_PKG_URL))
 elif not DEFAULT_PKG_URL and not any(n == "PKG_URL_DEFAULT" for n, _ in nonempty):
     print("NOTE: 未设置 GUARD_PKG_URL，未注入 PKG_URL_DEFAULT（部署时可用 HOOK_PACKAGE_URL 指定）")
-if not any(n.upper().startswith("GH_") for n, _ in nonempty):
+# 至少要有一个平台令牌：CNB_TOKEN(主来源)或 GH_*(可选来源)。只填 CNB_TOKEN 是合法配置。
+if not any(n.upper().startswith(("CNB_", "GH_")) for n, _ in nonempty):
     print("NO_TOKENS_EXTRACTED")
     sys.exit(1)
 

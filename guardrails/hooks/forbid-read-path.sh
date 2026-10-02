@@ -34,9 +34,12 @@ except Exception:
 [ "$raw" = "__PARSE_ERROR__" ] && deny "[policy] 无法解析 hook 输入，按拦截处理"
 [ -z "$raw" ] && pass
 # 相对路径无法可靠归一，不在这里判断（Bash 侧的命令串扫描仍覆盖那种形态）
-case "$raw" in /*) ;; *) pass ;; esac
+# Windows 上工具给的是带盘符的绝对路径（C:\… 或 C:/…），同样要判断，不能当相对路径放行
+case "$raw" in /*|[A-Za-z]:[\\/]*) ;; *) pass ;; esac
 
 rp=$(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$raw" 2>/dev/null) || rp="$raw"
+# Windows 上 realpath 给出反斜杠路径；下面的规则都按 / 写，先统一分隔符，否则一条都匹配不上
+rp=${rp//\\//}
 
 # 白名单：公钥与非机密文件。rev4 明确反对过度拦截（README 改动 11 把裸 `.env`/裸 `token`
 # 从 Bash 侧拿掉，因为会挡住日常命令）。这里逐一放行，而不是整目录封死。
@@ -48,6 +51,7 @@ esac
 SENSITIVE='(^|/)(\.git-credentials|\.netrc|\.npmrc|\.pypirc|\.cnb-auth-token|credentials|credentials\.json|hosts\.yml|tokens?\.(env|json|txt|ya?ml))$'
 SENSITIVE="$SENSITIVE"'|(^|/)\.claude/(settings\.json|\.credentials\.json)$'
 SENSITIVE="$SENSITIVE"'|(^|/)\.config/gh/hosts\.yml$'
+SENSITIVE="$SENSITIVE"'|(^|/)\.cnb/token$'            # cnb 命令行工具的登录令牌
 SENSITIVE="$SENSITIVE"'|(^|/)\.aws/credentials$'
 SENSITIVE="$SENSITIVE"'|(^|/)\.docker/config\.json$'
 SENSITIVE="$SENSITIVE"'|(^|/)\.ssh/'

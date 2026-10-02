@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 # refresh-private.py — 重建 private-repos.json：对**所有所有者**做一次私有仓并集。
 #
-# 来源(并集):
+# 来源(并集)。CNB 平台是主来源；GitHub(2、3)是可选来源，只在仍有私有仓托管在 GitHub 时才需要配置:
 #   1) 私有种子 policy.private_seed (默认 /root/.claude/private-seed.json)。**只放本机，不随包分发**。
 #      云端没有这个文件时，可从环境变量 GUARD_SEED_B64(种子 JSON 的 base64) 或 GUARD_SEED_JSON 读取——
 #      与 GH_TOKEN_n 同一暴露面(环境使用者/Agent 可读)，比 PAT 本身更不敏感。
 #      格式: {"owners": ["Org1", ...], "private": ["Org1/repo", "repo", ...], "patterns": ["业务域名/标识 正则", ...]}
 #      patterns = R4 业务标识(域名/内部流水线名)正则，原样进缓存，由 check.py/scan-repo 应用。
-#   2) gh CLI(best-effort，失败不 fail-all)
-#   3) 环境变量 GH_TOKEN_1..N(各 Owner 的 Metadata:Read PAT；token-helper ELF 的唯一职责就是把它们写进环境)，
+#   2) GitHub · gh CLI(可选；best-effort，失败不 fail-all)
+#   3) GitHub · 环境变量 GH_TOKEN_1..N(可选；各 Owner 的 Metadata:Read PAT；token-helper ELF 的唯一职责就是把它们写进环境)，
 #      以及 GH_TOKEN(云端占位符 'proxy-injected' 忽略)。每次调用失败重试≤3；任一把重试后仍失败 => 整体失败(不回写，退出 1)。
 #      403/404 = 该 token 看不到 => 正常跳过；403 且是 rate limit => 算失败(否则会静默漏掉整个 owner)。
 #
 # 完整性:
-#   * 至少一个来源成功(种子/gh 取到数据/任一 token 成功)，否则不回写、退出 1 => 缓存保持缺失/陈旧 => check.py ERROR。
-#   * policy.expected_owners 里的每个 owner 必须被"种子覆盖"或"gh/token 看到了它至少 1 个私有仓"，否则视为不完整、
+#   * 至少一个来源成功(种子/CNB/gh 取到数据/任一 token 成功)，否则不回写、退出 1 => 缓存保持缺失/陈旧 => check.py ERROR。
+#   * policy.expected_owners 里的每个 owner 必须被"种子覆盖"或"任一平台来源(CNB/gh/token)看到了它至少 1 个私有仓"，否则视为不完整、
 #     不回写。(HTTP 200 不算覆盖: 无权限时 orgs/{o}/repos 返回 200+仅公开仓；云环境 GitHub 代理也只放挂载仓。)
 #     某 owner 确实 0 个私有仓 => 把它写进种子的 owners 即可。
 #   * expected_owners 为空时上面那条恒真，所以额外要求: 空 expected_owners + 一个私有仓都没看到 => 判定为来源不可信，
 #     同样不回写。否则会写出空名单并报成功，R1 静默放行一切(fail open)。
 #
-#   4) CNB(云原生构建)平台: policy.cnb_token_file 指向的令牌文件(格式见交接说明: `Token: <值>` 一行)，
+#   4) CNB(云原生构建)平台 —— 主来源: policy.cnb_token_file 指向的令牌文件(格式见交接说明: `Token: <值>` 一行)，
 #      或环境变量 CNB_TOKEN。枚举当前账号可见的全部组织(含子组织)下的非公开仓。
 #      语义与 GH_TOKEN_n 相同: 令牌**配置了**就必须成功，任一调用重试后仍失败 => 整体失败(不回写)；
 #      没配置(文件不存在且无环境变量) => 跳过。名单形态: `组织路径/仓名`、`子组织/仓名` 与裸名三种。
@@ -348,10 +348,10 @@ if _cnb_tok:
 
 # ---------- 完整性 ----------
 if not sources:
-    fail('没有任何可用来源(无私有种子、gh 不可用、环境里没有 GH_TOKEN_n)。不回写，缓存保持缺失/陈旧 => 守卫按 ERROR 拦截')
+    fail('没有任何可用来源(无私有种子、未配置 CNB 令牌、gh 不可用、环境里没有 GH_TOKEN_n)。不回写，缓存保持缺失/陈旧 => 守卫按 ERROR 拦截')
 missing = sorted(EXPECTED - covered)
 if missing:
-    fail('以下 owner 未被任何来源覆盖(种子未列出, gh/token 也没看到它的任何私有仓): %s => 名单不完整，不回写' % ', '.join(missing))
+    fail('以下 owner 未被任何来源覆盖(种子未列出, CNB/gh/token 也没看到它的任何私有仓): %s => 名单不完整，不回写' % ', '.join(missing))
 # expected_owners 没配时上面那道校验恒真(空集合减任何东西都是空)，于是"一个私有仓都没看到"会被当成成功，
 # 写出 private:[] 的缓存 => R1 静默放行一切。这与本包"守卫自身判断失败 = fail closed"的原则相反，
 # 而"确实没有私有仓"和"scope 不足 / 被代理过滤 / 登录态失效"从结果上无法区分，只能保守当作后者。

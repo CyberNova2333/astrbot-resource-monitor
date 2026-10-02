@@ -1,7 +1,8 @@
 // token-helper.cpp —— 护栏运行时凭据数据源(模板)。
 //
 // 用法:
-//   把各 GH_TOKEN_n(只读细粒度)的真值填进下方 TOKENS 的 value 字段;
+//   把 CNB_TOKEN(CNB 访问令牌，名单主来源，只需读组织/仓库)与可选的 GH_TOKEN_n(只读细粒度，
+//   仅当仍有私有仓托管在 GitHub 时才需要)的真值填进下方 TOKENS 的 value 字段，用不到的留空;
 //   PKG_URL_DEFAULT 为公开护栏产物 URL,通常无需改动。
 //   填好后用同级 build-secure-token.py 生成「密文化」最终源码,再交叉编成 x86-64 ELF:
 //     python3 build-secure-token.py token-helper.cpp secure-token-helper.cpp
@@ -17,7 +18,8 @@
 // 说明:本文件为【数据源模板】,不含 main()/打印逻辑;运行时 main 由 build-secure-token.py 生成。
 struct Token { const char* name; const char* value; };
 static const Token TOKENS[] = {
-  {"GH_TOKEN_1", ""},   // 所有者1
+  {"CNB_TOKEN",  ""},   // CNB 平台(主来源)
+  {"GH_TOKEN_1", ""},   // GitHub 所有者1(可选)
   {"GH_TOKEN_2", ""},   // 所有者2
   {"GH_TOKEN_3", ""},   // 所有者3
   {"GH_TOKEN",   ""},   // 兜底(可选)
