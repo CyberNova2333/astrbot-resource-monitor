@@ -17,7 +17,7 @@
 #     新分支/远端 SHA 本地不可见 时不再全历史重审。
 #   * R4 业务标识正则也不在 policy.json 里了：来自缓存的 patterns(本机种子提供)。
 #   * R5 = 禁止推送到任何 Agent 分支(claude/ codex/ chatgpt/ … 见 policy.agent_branch_prefixes，大小写不敏感)。
-#     不做 main 保护/强推保护——那是 GitHub ruleset 的活。
+#     不做 main 保护/强推保护——那是托管平台的活(CNB 的保护分支与推送管控、GitHub 的 ruleset)。
 #   * R6 签名验证不再依赖 gpg.ssh.allowedSignersFile：直接取提交对象里的 gpgsig，用
 #     `ssh-keygen -Y check-novalidate` 做密码学验签并取出签名密钥指纹(git 的 %G?/%GK 没有 allowedSigners 时全是空)。
 #   * push 模式也扫新提交的**内容**(新增行)：cherry-pick/rebase/am/合并/--no-verify 进来的内容在这里兜底。
@@ -171,7 +171,7 @@ def private_check(text):
         if not NET:
             return ERROR, ['私有仓缓存%s，本层不联网刷新。请先运行: python3 %s  然后重试' % ('缺失/损坏' if st == 'error' else '已过期', REFRESH)]
         if st == 'error':
-            return ERROR, ['私有仓缓存缺失/损坏且刷新失败——请检查 私有种子/GH_TOKEN_n/网络 后运行 refresh-private.py']
+            return ERROR, ['私有仓缓存缺失/损坏且刷新失败——请检查 私有种子/CNB 令牌/GH_TOKEN_n/网络 后运行 refresh-private.py']
         return ERROR, ['私有仓缓存刷新失败(%s)，为防泄露按拦截处理——请修复网络/token 后重试' % st]
     try:
         rx = cache_patterns(d)
@@ -219,7 +219,7 @@ def resolve_unknown(text, d, priv):
     if len(cands) > RESOLVE_BUDGET:
         d2 = refresh_inplace()
         if cache_status(d2) != 'fresh':
-            return ERROR, ['未知裸名 %d 个超出单查预算且整体刷新失败——请修复 GH_TOKEN_n/网络 后重试' % len(cands)]
+            return ERROR, ['未知裸名 %d 个超出单查预算且整体刷新失败——请修复 CNB 令牌/GH_TOKEN_n/网络 后重试' % len(cands)]
         priv2 = cache_private(d2); low = text.casefold()
         hits = [p for p in priv2 - priv if p and p in low]
         return (VIOLATION, ['私有仓名(刷新后新增): ' + hits[0]]) if hits else (PASS, [])
@@ -233,7 +233,7 @@ def resolve_unknown(text, d, priv):
         return VIOLATION, ['私有仓名(即时查询): ' + ' '.join(priv_hits[:5])]
     errs = [n for n in cands if not isinstance(res.get(n), dict) or res[n].get('status') == 'error']
     if errs:
-        return ERROR, ['无法确认 %d 个裸名是否私有仓(GH_TOKEN_n/网络/gh 均不可用): %s' % (len(errs), ' '.join(errs[:5]))]
+        return ERROR, ['无法确认 %d 个裸名是否私有仓(CNB 令牌/GH_TOKEN_n/gh/网络 均不可用): %s' % (len(errs), ' '.join(errs[:5]))]
     return PASS, []
 
 

@@ -10,7 +10,7 @@ cmd=$(get_cmd)
 [ -z "$cmd" ] && pass
 # 1) 读取会暴露凭据的文件/环境
 if printf '%s' "$cmd" | grep -qiE \
-  '(^|[ ;|&(])(cat|sed|head|tail|grep|awk|view|less|more|bat|nl|tac|xxd|od|strings|base64|jq|yq|python3?|node|perl|ruby)( [^;|&]*)?(settings\.json|\.git-credentials|hosts\.yml|tokens?\.(env|json|txt|ya?ml)|credentials(\.json)?([ ;|&]|$)|(^|[ /"'"'"'])\.env([ "'"'"';|&]|$)|/proc/[^ ]*/environ)|(^|[ ;|&(/])env([ ;|&)]|$)|(^|[ ;|&(])printenv([ ;|&)]|$)|(declare|export) -p|os\.environ|process\.env|(^|[ ;|&(])token-helper( |$)|gh auth token|gh auth status[^;|&]*( -t| --show-token)|git config[^;|&]*credential|git credential(-[a-z]+)? (fill|get)'; then
+  '(^|[ ;|&(])(cat|sed|head|tail|grep|awk|view|less|more|bat|nl|tac|xxd|od|strings|base64|jq|yq|python3?|node|perl|ruby)( [^;|&]*)?(settings\.json|\.git-credentials|\.cnb-auth-token|\.cnb/token|hosts\.yml|tokens?\.(env|json|txt|ya?ml)|credentials(\.json)?([ ;|&]|$)|(^|[ /"'"'"'])\.env([ "'"'"';|&]|$)|/proc/[^ ]*/environ)|(^|[ ;|&(/])env([ ;|&)]|$)|(^|[ ;|&(])printenv([ ;|&)]|$)|(declare|export) -p|os\.environ|process\.env|(^|[ ;|&(])token-helper( |$)|gh auth token|gh auth status[^;|&]*( -t| --show-token)|git config[^;|&]*credential|git credential(-[a-z]+)? (fill|get)'; then
   deny "禁止主动读取/暴露凭据(token/PAT/settings env)：命令可能把 Token 打到会话里。如需用 token，由护栏内部通过 token-helper 获取。"
 fi
 # 2) echo/printf 环境里的凭据变量(含 ${VAR:0:n} 截取)

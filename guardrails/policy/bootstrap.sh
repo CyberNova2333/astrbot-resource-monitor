@@ -13,13 +13,14 @@
 #      则写进 .git/info/exclude，不污染 git status。云端只读仓库级 settings，这一步就是云端 Claude 层的全部。
 #   4. Claude 层(用户级)：~/.claude/settings.json 同样合并一份(本机 CLI 用；云端会忽略，无害)
 #   5. 依赖：ssh-keygen(R6 验签硬依赖)缺失时尽力 apt-get；python3/git/curl 缺失直接失败
-#   6. 私有仓并集刷新(best-effort)：来源 = 种子文件 / GUARD_SEED_B64 / GH_TOKEN_n(环境变量) / gh。Setup Script 里拿不到环境变量
+#   6. 私有仓并集刷新(best-effort)：来源 = 种子文件 / GUARD_SEED_B64 / CNB_TOKEN(主来源) / 可选的 GitHub(GH_TOKEN_n、gh)。Setup Script 里拿不到环境变量
 #      时这里会失败——没关系，仓库级 SessionStart hook 会在会话开始时(环境变量已就位)再刷；刷成功前守卫按 ERROR 拦一切写入/提交。
 #   7. 跑 doctor 打印自检
 #
 # 云端环境还需要在 Environment 设置里配：
-#   环境变量  GH_TOKEN_1..N = 各 Owner 的 Metadata:Read PAT； GUARD_SEED_B64 = `base64 -w0 private-seed.json`(owners/private/patterns)
-#   网络白名单  CDN 域名 + api.github.com (refresh/resolve 直连 GitHub API)
+#   环境变量  CNB_TOKEN = CNB 访问令牌(名单主来源，只需读组织/仓库)； GUARD_SEED_B64 = `base64 -w0 private-seed.json`(owners/private/patterns)
+#             可选：GH_TOKEN_1..N = 各 GitHub Owner 的 Metadata:Read PAT(只在仍有私有仓托管在 GitHub 时才需要)
+#   网络白名单  CDN 域名 + api.cnb.cool (refresh/resolve 直连 CNB OpenAPI)；配了 GitHub 来源时再加 api.github.com
 export PYTHONUTF8=1   # 中文 Windows / GBK 区域设置下让 python3 统一按 UTF-8 读写（标准流、open、子进程输出）
 set -u
 # >>>>>>>>>>>>>>>>>>>>>>>>  改这一行：CDN 上的包地址(.zip 或 .tgz)  <<<<<<<<<<<<<<<<<<<<<<<<
