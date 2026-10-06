@@ -8,33 +8,57 @@
 
 **阅读导航**
 
-[🏛️ 架构与职责](#section-1) · [🚀 安装与配置](#section-2) · [⚙️ 常用命令](#section-3) · [🧪 验证](#section-4) · [⚙️ 配置来源与通知边界](#section-5) · [📜 许可](#section-6)
+[🏛️ 分层代码架构](#section-1) · [🚀 安装与配置](#section-2) · [⚙️ 常用命令](#section-3) · [🧪 验证](#section-4) · [⚙️ 配置来源与通知边界](#section-5) · [📜 许可](#section-6)
 
 ---
 
 <a id="section-1"></a>
 
-## 🏛️ 架构与职责
+## 🏛️ 分层代码架构
+
+AstrBot 依赖集中在 `main.py`。`Monitor` 组织一轮检查，来源适配和探针通过 `HttpClient` 获取数据，调度与告警状态单独维护；判据和状态模块无需导入机器人框架。
+
+图中展示主要代码依赖：实线箭头指向被调用或被依赖的模块，虚线表示实现或生成关系；数据读写另用连线文字标明。
 
 ```mermaid
-flowchart TD
-    Config["部署侧配置"] --> Sources["sources / discovery · 配置与清单发现"]
-    Sources --> Runner["runner / probes · 内容检查"]
-    Schedule["scheduler · 抽样与覆盖"] --> Runner
-    Runner --> State["state · 故障去重、抑制与恢复"]
-    State --> Main["main.py · AstrBot 接线"]
-    Main --> Notify["配置的通知会话"]
-    Commands["用户命令"] --> Main
-    Main --> Schedule
+flowchart TB
+    subgraph L0["框架适配层"]
+        BOT["main.py · ResourceWatch"]
+        CMD["commands / render"]
+    end
+    subgraph L1["应用编排层"]
+        MON["runner.py · Monitor"]
+    end
+    subgraph L2["检查与状态领域"]
+        SOURCE["sources / discovery"]
+        PROBE["probes"]
+        STATE["scheduler / state / models"]
+    end
+    subgraph L3["IO 适配层"]
+        HTTP["HttpClient / AiohttpClient"]
+        STORE["store.py"]
+    end
+    BOT --> CMD
+    BOT --> MON
+    BOT --> HTTP
+    MON --> SOURCE
+    MON --> PROBE
+    MON --> STATE
+    SOURCE --> HTTP
+    PROBE --> HTTP
+    STATE --> STORE
 ```
 
-| 路径 | 职责 |
-|---|---|
-| `main.py` | AstrBot 注册、命令与通知接线 |
-| `watch/sources.py` / `discovery.py` | 配置源适配与清单发现 |
-| `watch/probes.py` / `runner.py` | 探针与单轮检查 |
-| `watch/scheduler.py` / `state.py` | 抽样覆盖、故障去重、恢复与静音 |
-| `tests/` | 使用假响应的离线判据测试 |
+| 层次 | 源码入口 | 职责与边界 |
+|---|---|---|
+| 框架适配层 | [main.py · ResourceWatch](main.py) | 注册命令、定时任务、HTTP 实例与会话通知。 |
+| 框架适配层 | [commands / render](watch/commands.py) | 解析操作、组织状态文本和通知文本。 |
+| 应用编排层 | [runner.py · Monitor](watch/runner.py) | 协调发现、抽样、探针结果和告警状态。 |
+| 检查与状态领域 | [sources / discovery](watch/sources.py) | 将配置源、清单和版本文档转换成检查输入。 |
+| 检查与状态领域 | [probes](watch/probes.py) | 判定内容、Range、摘要与一致性等结果。 |
+| 检查与状态领域 | [scheduler / state / models](watch/state.py) | 维护抽样覆盖、故障状态与恢复通知对象。 |
+| IO 适配层 | [HttpClient / AiohttpClient](watch/http.py) | 提供可替换 HTTP 能力，测试使用假响应实现。 |
+| IO 适配层 | [store.py](watch/store.py) | 负责本地 JSON 状态读写。 |
 
 <a id="-安装与配置"></a>
 
