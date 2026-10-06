@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bootstrap.sh —— 护栏铺设脚本(rev4)。两种用法：
-#   A) Anthropic 云端 → Environment → Setup Script：把本文件整段粘进去，改好下面的 PKG_URL_DEFAULT。
-#      (Setup Script 以 root、在仓库根目录运行；每个环境缓存只跑一次；环境变量不一定进得来，所以 URL 直接写死)
+#   A) Anthropic 云端 → Environment → Setup Script：把本文件整段粘进去，由部署环境设置 HOOK_PACKAGE_URL。
+#      (Setup Script 以 root、在仓库根目录运行；每个环境缓存只跑一次；地址只保存在部署侧)
 #   B) 本机(Droidspaces)：HOOK_PACKAGE_URL=file:///sdcard/guardrails-rev4-package.zip bash bootstrap.sh
 #      再运行一次 = 升级(幂等；私有种子/映射表/缓存会保留)。
 #
@@ -20,16 +20,16 @@
 # 云端环境还需要在 Environment 设置里配：
 #   环境变量  CNB_TOKEN = CNB 访问令牌(名单主来源，只需读组织/仓库)； GUARD_SEED_B64 = `base64 -w0 private-seed.json`(owners/private/patterns)
 #             可选：GH_TOKEN_1..N = 各 GitHub Owner 的 Metadata:Read PAT(只在仍有私有仓托管在 GitHub 时才需要)
-#   网络白名单  CDN 域名 + api.cnb.cool (refresh/resolve 直连 CNB OpenAPI)；配了 GitHub 来源时再加 api.github.com
+#   网络白名单  实际包下载域名与名单 API 域名；CNB_API 由部署环境设置，配了 GitHub 来源时再加对应 API 域名
 export PYTHONUTF8=1   # 中文 Windows / GBK 区域设置下让 python3 统一按 UTF-8 读写（标准流、open、子进程输出）
 set -u
-# >>>>>>>>>>>>>>>>>>>>>>>>  改这一行：CDN 上的包地址(.zip 或 .tgz)  <<<<<<<<<<<<<<<<<<<<<<<<
-PKG_URL_DEFAULT="https://YOUR-CDN.example/guardrails-rev4-package.zip"
-URL="${HOOK_PACKAGE_URL:-$PKG_URL_DEFAULT}"
+# 地址由部署环境或 token-helper 注入，包内不携带默认端点。
+URL="${HOOK_PACKAGE_URL:-${PKG_URL_DEFAULT:-}}"
 GUARD="${GUARD_DIR:-$HOME/.claude/guardrails}"
 SETUP_VERSION="v4"
 log(){ printf '[guardrails] %s\n' "$*"; }
 die(){ log "失败: $*"; log "没有护栏就不该让 Agent 跑——请修好后重跑本脚本"; exit 1; }
+[ -n "$URL" ] || die "请在部署环境设置 HOOK_PACKAGE_URL 或 PKG_URL_DEFAULT"
 
 # ---- 1. 依赖 ----
 for b in python3 git curl; do command -v "$b" >/dev/null 2>&1 || die "缺少 $b"; done
@@ -40,7 +40,6 @@ if ! command -v ssh-keygen >/dev/null 2>&1; then
 fi
 
 # ---- 2. 下载 + 解包(保留本机私有文件与缓存) ----
-case "$URL" in *YOUR-CDN.example*) die "PKG_URL_DEFAULT 还是占位符，请填 CDN 地址(或设置 HOOK_PACKAGE_URL)";; esac
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 curl -fsSL "$URL" -o "$TMP/pkg" || die "包下载失败: $URL"
 mkdir -p "$TMP/x"

@@ -92,9 +92,9 @@ settings.json        # 本机 CLI 用的 Claude Code hooks 示例(env 已脱敏)
 
 ## 部署(两边都用 bootstrap.sh，装出来的目录结构完全一致：`/root/.claude/guardrails/`)
 ### 云端：Anthropic 云端 → Environment → Setup Script
-1. 把 `policy/bootstrap.sh` 整段粘进 Setup Script，改第一处 `PKG_URL_DEFAULT` 为 CDN 上的包地址(zip/tgz 均可)。
+1. 把 `policy/bootstrap.sh` 整段粘进 Setup Script，在部署环境设置 `HOOK_PACKAGE_URL` 为包地址(zip/tgz 均可)，也可沿用 token-helper 导出的 `PKG_URL_DEFAULT`。两者均为空时，脚本会在安装前退出。
 2. Environment 环境变量：`CNB_TOKEN`(CNB 访问令牌，名单主来源，只需读组织/仓库)、`GUARD_SEED_B64`(`base64 -w0 private-seed.json`)；可选 `GH_TOKEN_1..N`(各 GitHub Owner 的 Metadata:Read PAT，只在仍有私有仓托管在 GitHub 时才需要)。
-3. Environment 网络白名单：CDN 域名 + `api.cnb.cool`；配了 GitHub 来源时再加 `api.github.com`。
+3. 在部署环境设置 `CNB_API`，或填写安装目录 `policy.json` 的 `cnb_api`；环境变量优先，包内默认留空。网络白名单只加入实际包下载域名与所用名单 API 域名。已配置令牌却缺少 API 地址时，刷新失败且保留旧缓存；实时查询返回 `error`，不会把配置缺失当成仓库不存在。
 4. 脚本做的事(幂等，不漏装不重装)：装包 → 改写路径 → `core.hooksPath`(git 层，所有仓库自动生效) → 当前仓库 `.claude/settings.json` 合并 5 个 PreToolUse + SessionStart + `attribution.sessionUrl=false`(云端唯一会读的 Claude 层来源；按脚本名去重，仓库里已提交过护栏 settings 的不会再装；新写的文件进 `.git/info/exclude`) → 用户级 settings(云端忽略) → 刷新名单(拿不到环境变量就留给 SessionStart) → doctor。
    下载/解包失败脚本退出 1(环境创建失败)——没有护栏就不该让 Agent 跑。
 5. 云端已知限制：GitHub 代理只放挂载仓库、只允许推 `claude/…`(与 R5 相斥，云端推不出东西，按设计)；环境变量与 Setup Script 对环境使用者/Agent 可读。
