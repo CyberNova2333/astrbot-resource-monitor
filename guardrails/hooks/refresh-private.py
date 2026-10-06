@@ -238,7 +238,7 @@ for idx, (envname, tok) in enumerate(all_tokens(), 1):
     sources.append('token%d' % idx)
 
 # 4) CNB 平台(令牌配置了就必须成功；没配置就跳过)
-CNB_API = POLICY.get('cnb_api', 'https://api.cnb.cool').rstrip('/')
+CNB_API = (os.environ.get('CNB_API') or POLICY.get('cnb_api') or '').strip().rstrip('/')
 CNB_TOKEN_FILE = POLICY.get('cnb_token_file', '/root/.cnb-auth-token')
 cnb_groups = []
 
@@ -321,6 +321,8 @@ def cnb_collect(group_path, items):
 
 _cnb_tok = cnb_token()
 if _cnb_tok:
+    if not CNB_API:
+        fail('CNB 令牌已配置，但未设置 CNB_API 或部署侧 policy.cnb_api；不回写缓存')
     kind, groups = cnb_pages('/user/groups', _cnb_tok)
     if kind == 'error':
         fail('CNB 令牌已配置，但枚举 /user/groups 失败(网络/令牌无效)')

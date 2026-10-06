@@ -28,7 +28,7 @@ CACHE = POLICY['private_cache']; NEG = CACHE + '.resolve.json'
 SEED = POLICY.get('private_seed', '')
 NEG_TTL = int(POLICY.get('resolve_cache_ttl', 86400))
 PER_CALL_TIMEOUT = 3
-CNB_API = POLICY.get('cnb_api', 'https://api.cnb.cool').rstrip('/')
+CNB_API = (os.environ.get('CNB_API') or POLICY.get('cnb_api') or '').strip().rstrip('/')
 CNB_TOKEN_FILE = POLICY.get('cnb_token_file', '/root/.cnb-auth-token')
 
 
@@ -100,6 +100,8 @@ def gh_api(owner, repo):
 
 def cnb_api(group_path, repo, tok):
     """GET /{组织路径}/{仓名}：200 看 visibility_level；404/403 看不到；其余 error。必须带 accept: application/json。"""
+    if not CNB_API:
+        return 'error'  # 缺少部署配置不能解释成仓库不存在。
     for attempt in range(2):
         try:
             req = urllib.request.Request('%s/%s/%s' % (CNB_API, group_path, repo),
