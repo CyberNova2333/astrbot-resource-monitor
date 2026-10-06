@@ -16,6 +16,18 @@
 
 ## 🏛️ 架构与职责
 
+```mermaid
+flowchart TD
+    Config["部署侧配置"] --> Sources["sources / discovery · 配置与清单发现"]
+    Sources --> Runner["runner / probes · 内容检查"]
+    Schedule["scheduler · 抽样与覆盖"] --> Runner
+    Runner --> State["state · 故障去重、抑制与恢复"]
+    State --> Main["main.py · AstrBot 接线"]
+    Main --> Notify["配置的通知会话"]
+    Commands["用户命令"] --> Main
+    Main --> Schedule
+```
+
 | 路径 | 职责 |
 |---|---|
 | `main.py` | AstrBot 注册、命令与通知接线 |
