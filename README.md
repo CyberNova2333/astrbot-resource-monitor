@@ -72,6 +72,12 @@ flowchart TB
 
 本地配置模板见 [config.example.json](config.example.json)，字段定义见 [_conf_schema.json](_conf_schema.json)。真实地址、通知会话与凭据只保存在部署侧。
 
+插件统一使用 `astrbot_plugin_resource_watch` 标识，入口类为 `ResourceWatch`，默认 User-Agent 为 `resource-watch/1.0`。WebUI 配置缺失或不可用时，可通过环境变量 `RESOURCE_WATCH_CONFIG` 指定本地 JSON 配置文件；有效的 WebUI 配置优先。
+
+从旧安装迁移时，先停用旧插件，将原 WebUI 配置复制到新标识对应的配置中，并将启动脚本中的配置文件环境变量更新为 `RESOURCE_WATCH_CONFIG`；不提供旧标识别名。将配置中显式保存的 `runtime.user_agent` 更新为 `resource-watch/1.0`，或清空以采用默认值。保留原 `runtime.state_dir` 及其中的 `watch-state.json`，可继续沿用故障去重、静音和抽样覆盖状态。迁移后只启用一份插件，执行 `/线路 状态` 验证配置。
+
+项目历史已统一为功能性命名。已有克隆应先另存未提交的改动，再重新克隆，逐项迁移本地配置；不要合并或推回旧历史。提交重写会改变提交 ID，历史提交保留原作者与时间，并由维护者重新进行 SSH 签名。
+
 开发护栏的下载地址与名单 API 同样由部署侧提供：安装使用 `HOOK_PACKAGE_URL`（兼容 `PKG_URL_DEFAULT`），名单查询使用 `CNB_API` 或安装目录策略的 `cnb_api`。源码不提供默认端点；缺少必要配置时安装或名单刷新会报错。具体流程见 [护栏部署说明](guardrails/README.md)。
 
 <a id="-常用命令"></a>
