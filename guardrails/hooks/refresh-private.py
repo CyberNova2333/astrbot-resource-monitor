@@ -10,7 +10,7 @@
 #   2) GitHub · gh CLI(可选；best-effort，失败不 fail-all)
 #   3) GitHub · 环境变量 GH_TOKEN_1..N(可选；各 Owner 的 Metadata:Read PAT；token-helper ELF 的唯一职责就是把它们写进环境)，
 #      以及 GH_TOKEN(云端占位符 'proxy-injected' 忽略)。每次调用失败重试≤3；任一把重试后仍失败 => 整体失败(不回写，退出 1)。
-#      403/404 = 该 token 看不到 => 正常跳过；403 且是 rate limit => 算失败(否则会静默漏掉整个 owner)。
+#      403 = 枚举权限不明，保留旧缓存；仅可选组织查询的 404 可以跳过。
 #
 # 完整性:
 #   * 至少一个来源成功(种子/CNB/gh 取到数据/任一 token 成功)，否则不回写、退出 1 => 缓存保持缺失/陈旧 => check.py ERROR。
@@ -76,13 +76,7 @@ def api_once(url, tok):
         with urllib.request.urlopen(req, timeout=12) as resp:
             return 'resolved', json.load(resp)
     except urllib.error.HTTPError as e:
-        if e.code in (403, 404):
-            try:
-                body = e.read().decode('utf-8', 'replace').lower()
-            except Exception:
-                body = ''
-            if e.code == 403 and ('rate limit' in body or e.headers.get('X-RateLimit-Remaining') == '0'):
-                return 'error', None                   # 限流不是"看不到"，是失败
+        if e.code == 404:
             return 'skipped', None
         return 'error', None
     except Exception:
@@ -109,8 +103,8 @@ def api_pages(path, tok):
             return 'error', out
         out.extend(r)
         if len(r) < 100:
-            break
-    return 'resolved', out
+            return 'resolved', out
+    return 'error', out  # 达到分页预算不是枚举完成，不能用截断名单覆盖旧缓存。
 
 
 # ---------- gh CLI (best-effort) ----------
@@ -138,11 +132,11 @@ def gh_list(path):
         r = gh_json(['%s%sper_page=100&page=%d' % (path, '&' if '?' in path else '?', page),
                      '--jq', '[.[]|{name,full_name,private,fork}]'])
         if not isinstance(r, list):
-            return None if page == 1 else out
+            return None
         out.extend(r)
         if len(r) < 100:
-            break
-    return out
+            return out
+    return None
 
 
 # ---------- collect ----------
@@ -216,13 +210,13 @@ for o in sorted(owners):
 for idx, (envname, tok) in enumerate(all_tokens(), 1):
     seen_here = set()
     kind, u = api_retry('https://api.github.com/user', tok)
-    if kind == 'error':
+    if kind != 'resolved' or not isinstance(u, dict) or not u.get('login'):
         fail('token #%d 调用 /user 失败(网络/限流/无效)' % idx)
     login = u.get('login') if kind == 'resolved' and isinstance(u, dict) else None
     if login:
         owners.add(login)
     kind, mine = api_pages('user/repos?affiliation=owner', tok)
-    if kind == 'error':
+    if kind != 'resolved':
         fail('token #%d 枚举 user/repos 失败' % idx)
     if kind == 'resolved':
         seen_here |= collect(mine)
@@ -262,9 +256,7 @@ def cnb_api_once(path, tok):
                                                               'User-Agent': 'refresh-private'})
         with urllib.request.urlopen(req, timeout=15) as resp:
             return 'resolved', json.load(resp)
-    except urllib.error.HTTPError as e:
-        if e.code in (403, 404):
-            return 'skipped', None
+    except urllib.error.HTTPError:
         return 'error', None
     except Exception:
         return 'error', None
@@ -286,13 +278,13 @@ def cnb_pages(path, tok):
         kind, r = cnb_api_retry('%s%spage=%d&page_size=100' % (path, '&' if '?' in path else '?', page), tok)
         if kind != 'resolved':
             return kind, out
-        items = r if isinstance(r, list) else (r.get('list') or r.get('items') or []) if isinstance(r, dict) else None
-        if items is None:
+        items = r if isinstance(r, list) else r.get('list', r.get('items')) if isinstance(r, dict) else None
+        if not isinstance(items, list):
             return 'error', out
         out.extend(items)
         if len(items) < 100:
-            break
-    return 'resolved', out
+            return 'resolved', out
+    return 'error', out
 
 
 def cnb_collect(group_path, items):
@@ -324,7 +316,7 @@ if _cnb_tok:
     if not CNB_API:
         fail('CNB 令牌已配置，但未设置 CNB_API 或部署侧 policy.cnb_api；不回写缓存')
     kind, groups = cnb_pages('/user/groups', _cnb_tok)
-    if kind == 'error':
+    if kind != 'resolved':
         fail('CNB 令牌已配置，但枚举 /user/groups 失败(网络/令牌无效)')
     # 组织可能有子组织；逐层展开。对象里带 path(完整路径)。
     queue = [g.get('path') for g in (groups or []) if isinstance(g, dict) and g.get('path')]
@@ -335,13 +327,13 @@ if _cnb_tok:
             continue
         seen_paths.add(gp)
         kind, subs = cnb_pages('/user/groups/%s' % gp, _cnb_tok)
-        if kind == 'error':
+        if kind != 'resolved':
             fail('CNB 枚举子组织 %s 失败' % gp)
         for s in subs or []:
             if isinstance(s, dict) and s.get('path'):
                 queue.append(s['path'])
         kind, repos = cnb_pages('/%s/-/repos' % gp, _cnb_tok)
-        if kind == 'error':
+        if kind != 'resolved':
             fail('CNB 枚举 %s 下的仓库失败' % gp)
         if kind == 'resolved':
             cnb_collect(gp, repos)

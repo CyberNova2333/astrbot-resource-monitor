@@ -48,8 +48,6 @@ git 钩子唯一挡不住的就是绕过 git 钩子本身。两条路都拦：
 
 import json
 import os
-import re
-import shlex
 import subprocess
 import sys
 
@@ -60,56 +58,17 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
         _s.reconfigure(encoding="utf-8", errors="replace")
 
 HOOKS_DIR = "tools/githooks"
-# commit 的 -n 是 --no-verify，可以并进组合短选项（-an）。
-# push 的 -n 是 --dry-run，无害，所以只在 commit 上认 -n。
-COMMIT_SHORT_NOVERIFY = re.compile(r"^-[A-Za-z]*n[A-Za-z]*$")
 
 
-def split_segments(cmd):
-    """按 shell 分隔符切段并分词。分不了词的段退回朴素 split（fail-open）。"""
-    cmd = re.sub(r"\\\n", " ", cmd)          # 先接上反斜杠续行，否则切段会切断它
-    for seg in re.split(r"&&|\|\||[;|\n]", cmd):
-        try:
-            yield shlex.split(seg)
-        except ValueError:                   # 引号不配对等
-            yield seg.split()
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 "guardrails", "policy"))
+try:
+    from shell_commands import offending  # 共用解析器，随包钩子与仓库钩子保持一致。
+except Exception:
+    sys.stderr.write("agent-guard: 命令解析器不可用，本次跳过命令检查\n")
 
-
-def offending(cmd):
-    """返回被拦下的理由（字符串），没问题则返回 None。"""
-    for toks in split_segments(cmd):
-        try:
-            i = next(k for k, t in enumerate(toks)
-                     if t == "git" or t.endswith("/git"))
-        except StopIteration:
-            continue
-        rest, sub, hooks_off = toks[i + 1:], None, False
-        j = 0
-        while j < len(rest):                 # 跳过 git 自己的全局选项
-            t = rest[j]
-            if t == "-c" and j + 1 < len(rest):
-                if rest[j + 1].split("=", 1)[0].strip().lower() == "core.hookspath":
-                    hooks_off = True
-                j += 2
-                continue
-            if t.startswith("-"):
-                if t.lower().startswith("-ccore.hookspath"):
-                    hooks_off = True
-                j += 1
-                continue
-            sub = t
-            rest = rest[j + 1:]
-            break
-        if sub not in ("commit", "push"):
-            continue
-        if hooks_off:
-            return "-c core.hooksPath=…（把钩子目录换掉）"
-        for t in rest:
-            if t == "--no-verify":
-                return "--no-verify"
-            if sub == "commit" and COMMIT_SHORT_NOVERIFY.match(t):
-                return t + "（commit 的 -n 就是 --no-verify）"
-    return None
+    def offending(cmd):
+        return None
 
 
 def git(*args, **kw):
@@ -157,6 +116,7 @@ def main():
     try:
         data = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
     except Exception:
+        sys.stderr.write("agent-guard: 无法解析输入，本次放行\n")
         return 0
     cmd = ((data.get("tool_input") or {}).get("command") or "")
     if "git" not in cmd:
@@ -168,11 +128,12 @@ def main():
     try:
         note = ensure_hooks_path(cwd)
     except Exception:
-        note = None                                   # fail-open
+        note = "无法检查钩子配置，本次放行"
 
     try:
         why = offending(cmd)
     except Exception:
+        sys.stderr.write("agent-guard: 命令检查自身失败，本次放行\n")
         why = None                                    # fail-open
     if why:
         sys.stderr.write(
@@ -194,4 +155,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception:
+        sys.stderr.write("agent-guard: 检查自身失败，本次放行\n")
         sys.exit(0)

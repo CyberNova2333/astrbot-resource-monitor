@@ -6,7 +6,7 @@
 set -uo pipefail
 . "$(dirname "$0")/_lib.sh"
 cmd=$(get_cmd)
-[ "$cmd" = "__PARSE_ERROR__" ] && deny "[policy] 无法解析 hook 输入，按拦截处理"
+[ "$cmd" = "__PARSE_ERROR__" ] && warn_pass "无法解析 hook 输入"
 [ -z "$cmd" ] && pass
 # 1) 读取会暴露凭据的文件/环境
 if printf '%s' "$cmd" | grep -qiE \

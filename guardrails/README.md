@@ -1,7 +1,7 @@
 # 守卫「防犯蠢」护栏系统 — rev4
 
 > 定位：**防 Agent 犯蠢/漏/误操作**，不是防恶意 Agent 的安全边界（Agent 是 root，任何本机护栏都能被它绕开）。
-> 原则：**守卫自身判断失败 = Fail closed**。Claude hooks 层 = 快速提醒；Git hooks 层 = 本机强制。
+> 原则：**确认违规才阻断；守卫自身判断失败则提示并放行**（根目录 `CLAUDE.md` 铁律 7）。Claude hooks 层 = 快速提醒；Git hooks 层 = 提交/推送复验。
 > 说明：包内 `GH_TOKEN`/`ghp_`/`github_pat_` 等是**检测规则/占位符**，非真实密钥。`token-helper.cpp` 的 value 均为空。
 >
 > **rev4 最重要的变化：本包不再含任何私有仓库名、业务域名或内部标识。** R1(私有仓名) 和 R4(业务标识正则) 全部走
@@ -41,7 +41,7 @@ settings.json        # 本机 CLI 用的 Claude Code hooks 示例(env 已脱敏)
 - token-helper 编译产物(含 token)——把 `CNB_TOKEN` 与可选的 `GH_TOKEN_1..N` 写进 Claude Code / 钩子的运行环境；云端直接在 Environment 环境变量里配。
 
 ## 规则 R1–R7
-- **R1** 私有仓名：来自 `private-repos.json`(`Owner/repo` 与裸名两种形态；裸名为子串匹配，设计如此)。缓存缺失/损坏/过期 → **ERROR → 拦**：git 钩子(`--net`)会先就地刷新一次，Claude hooks 不联网、直接让 Agent 跑 `refresh-private.py`。
+- **R1** 私有仓名：来自 `private-repos.json`(`Owner/repo` 与裸名两种形态；裸名为子串匹配，设计如此)。缓存缺失/损坏/过期 → **ERROR → 提示检查未完成并放行**：git 钩子(`--net`)会先就地刷新一次，Claude hooks 不联网并提示运行 `refresh-private.py`。
   补充(`--net`)：缓存里没有、但长得像仓名的裸名(`xxx-xxx`，≥6 字符、至少一段含 2 个字母、后面不跟 `:`) 与 已知 owner 下的 `owner/repo`，交给 `resolve-private.py` 逐个问 refresh 成功过的平台(CNB / GitHub)：private → 拦；public/不存在 → 放；查不到(无令牌/网络) → ERROR。候选超过 `resolve_budget`(30) 时不逐个查，改为整体 refresh 一次再按新名单比。`Co-authored-by` 等 trailer 键与 `pre-commit` 等常见词在 `resolve_ignore` 里忽略。
 - **R2** 具体型号与会话标识：完整清单见 `policy/policy.json` 的 `forbidden_patterns`（随包分发，不含私密信息）。此处不逐字列举——包若含禁词举例，会被自己的规则拦住提交。
   形态上有误伤(英文里的同类句式)——按约定提交信息全中文，不处理；注意这些正则也作用于文件内容。
@@ -54,6 +54,8 @@ settings.json        # 本机 CLI 用的 Claude Code hooks 示例(env 已脱敏)
 - **R7** 禁提交凭据**值**(`gh[pousr]_`、`github_pat_`、私钥、AKIA、`sk-…`(含 sk-proj-/sk-ant-)、xox、AIza、glpat、npm_)。**不再匹配变量名**(`GH_TOKEN`/`GITHUB_TOKEN`)。deny 理由里的凭据只回显前 8 字符。
 
 ## rev4 相对 rev3 的改动(全部有沙箱测试)
+
+以下为历史说明；涉及旧版错误处理的描述，以本节前的现行规则和文末审计修复说明为准。
 1. **私有仓名出包**：policy.json / forbid-patterns(已删，无人读取) / refresh-private 写死种子 / private-repos.json / msgcb 映射 全部清除；名单进 `local-only/`。
 2. **R1 三模式统一**：rev3 的 commit-msg / pre-push / scan-repo 只查静态表(只在缓存里、不在静态表里的私有仓名，在 commit 模式直接 pass)。
 3. **deny 理由脱敏**：rev3 会把命中的完整 token 原文回显进 Agent 会话。
@@ -139,6 +141,16 @@ python3 /root/.claude/guardrails/hooks/refresh-private.py && python3 /root/.clau
 1. **名单来源以 CNB 为主、GitHub 改为可选**：仓库已迁到 CNB，CNB 平台（令牌文件或 `CNB_TOKEN`）成为私有仓名单的主来源；GitHub（`GH_TOKEN_n`、gh）只在仍有私有仓托管在 GitHub 时才需要配置。取并集、令牌配置了就必须成功、没配置就跳过的语义不变——refresh / resolve 的判定逻辑本来就与平台无关，这次改的是外围：
    - `token-helper.cpp` 新增 `CNB_TOKEN` 槽位；`build-secure-token.py` 原先要求至少有一个 `GH_` 开头的令牌，**只填 CNB 令牌会直接报 `NO_TOKENS_EXTRACTED` 构建失败**，现在 `CNB_` 与 `GH_` 任一即可；
    - `doctor.py` 新增「配置了 CNB 令牌」检查；没有 `GH_TOKEN_n` 降为提示而不再告警；判断「缓存含平台实时数据」时把 `seed-env`（来自环境变量的种子）也当作种子，此前会误判为实时数据；
-   - `bootstrap.sh` 与部署说明：环境变量以 `CNB_TOKEN` 为主，网络白名单加 `api.cnb.cool`；`check.py` / `refresh-private.py` 的出错提示补上 CNB 令牌；`policy.json` 的来源说明同步改写；「main 保护是 GitHub ruleset 的活」改为平台中性的表述。
+   - `bootstrap.sh` 与部署说明：环境变量以 `CNB_TOKEN` 为主，网络白名单加入部署侧配置的名单 API 地址；`check.py` / `refresh-private.py` 的出错提示补上 CNB 令牌；`policy.json` 的来源说明同步改写；「main 保护是 GitHub ruleset 的活」改为平台中性的表述。
 2. **把 cnb 命令行工具的登录令牌 `~/.cnb/token` 加入禁读名单**（`forbid-read-secret.sh` 与 `forbid-read-path.sh`）：此前 GitHub 的 `hosts.yml`、CNB 的 `.cnb-auth-token` 都在名单里，唯独它不在，`cat ~/.cnb/token` 可以直接把令牌读进会话。
 3. **`forbid-read-path.sh` 在 Windows 上完全不生效（rev4.1 起）**：一是开头只把以 `/` 开头的路径当绝对路径，Windows 上 Read / Grep 给的是 `C:\…` 形态，于是直接放行；二是 `realpath` 在 Windows 上返回反斜杠路径，按 `/` 写的规则一条也匹配不上。现在接受盘符路径，并在规范化后统一把 `\` 换成 `/`。实测 `C:\…`、`C:/…`、`/c/…` 三种形态下的令牌、私钥、Claude 配置与 `.env` 均能拦住，公钥、`.env.example` 与普通文件照常放行。
+
+
+## 审计修复后的现行行为
+
+- `pass`、`violation`、`error` 保持独立。只有 `violation` 阻断；检查器缺失、输入解析失败、网络/API 失败等 `error` 会明确提示本次未完成检查并放行。刷新失败仍保留原缓存，不把未知结果写成成功。
+- 列表接口的 403、必需接口的 404、响应形状错误、分页预算耗尽都不能证明枚举完成，因此不替换缓存。单仓查询仅调用刷新成功记录的来源；未启用的 `gh` 不作为 PAT 查询的必需依赖。
+- `shell_commands.py` 是仓库 Agent 钩子和随包 commit/push 快速钩子的共用解析器。引号、注释、here-doc 正文、选项值与实际命令分开处理，避免把提交消息或 `printf` 的例子当作绕过指令；支持带目录等全局选项的 Git 调用。
+- 新提交内容检查覆盖初始提交，路径从 Git 的零字节分隔输出读取，不依赖用户设置的 diff 前缀。
+- 根仓库的地址守卫在 pre-push 中接收实际新增提交，检查消息、路径和新 blob。工作区清理或后续删除不能掩盖已提交内容；标签和合并提交也在范围内。
+- `msgcb-hygiene.py` 是 `git-filter-repo --message-callback` 的函数体片段，末尾 `return` 是回调协议，不是独立模块；不要将它作为脚本运行或纳入普通模块语法编译。

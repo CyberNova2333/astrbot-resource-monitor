@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """守住铁律 1：**任何具体地址、凭证都不进版本库**。
 
-用法：python3 tools/check-no-endpoints.py [--verbose]
-退出码 0 = 干净，1 = 有问题（CI 与 pre-push 钩子都按这个判）。
+用法：python3 tools/check-no-endpoints.py [--verbose] [--commits-stdin]
+退出码 0 = 干净，1 = 确认违规，2 = 检查自身失败（钩子提示并放行）。
 
 ## 为什么这条要用守卫钉，而不是写在文档里
 
@@ -31,10 +31,16 @@
 被误伤过一次的人，下次就会习惯性加 SKIP_ENDPOINT_HOOK=1，那时守卫就等于没有。
 """
 
+import io
 import os
 import re
 import subprocess
 import sys
+import tokenize
+
+for _stream in (sys.stdin, sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 # ── 允许出现的主机 ────────────────────────────────────────────────
 #
@@ -76,7 +82,7 @@ SCAN_SUFFIXES = (".py", ".md", ".json", ".jsonc", ".yaml", ".yml", ".toml",
 FORBIDDEN_TRACKED = ("config.toml", "config.json", "config.yaml", "config.yml",
                      ".env", "conf/config.toml", "conf/config.json")
 
-URL = re.compile(r"\bhttps?://([^\s/\"'`)\]}>,;]+)", re.I)
+URL = re.compile(r"\bhttps?://(\[[^\s/\"'`)}>,;]+|[^\s/\"'`)\]}>,;]+)", re.I)
 # 裸主机名：至少两段 + 已知 TLD。三处刻意收紧，都是被误伤换来的：
 #
 #   · 后缀表只放**真会被写进来**的那些——宁可漏一个陌生 TLD，也不要把
@@ -115,11 +121,31 @@ SECRETS = (
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"), "私钥"),
 )
 
-PLACEHOLDER_CHARS = "…<>{}[]\\"
+PLACEHOLDER_CHARS = "…<>{}\\"
 
 
 def host_allowed(host):
-    host = host.split("@")[-1].split(":")[0].strip().lower().rstrip(".")
+    host = host.strip().rsplit("@", 1)[-1]
+    if host.startswith("["):
+        # 损坏 URL 的回归夹具也会故意缺括号；已允许的示例域名不会因此变成真地址。
+        example = host.strip("[]").lower().rstrip(".")
+        if ":" not in example and any(
+                example == h or example.endswith("." + h) for h in ALLOWED_HOSTS):
+            return True
+        # 方括号是 IPv6 语法，不能当作任意地址的占位符豁免。
+        bracketed = re.fullmatch(r"\[([^\[\]]+)\](?::[0-9]+)?", host)
+        if not bracketed:
+            return False
+        literal = bracketed.group(1)
+        return ":" in literal and _is_unroutable_literal(literal)
+    if host.count(":") == 1:
+        host, _ = host.rsplit(":", 1)
+    if host == "%s":
+        return True                      # 只允许完整主机占位符，不豁免含 %s 的真实域名。
+    try:
+        host = host.encode("idna").decode("ascii").lower().rstrip(".")
+    except UnicodeError:
+        return False
     if not host or any(c in host for c in PLACEHOLDER_CHARS):
         return True                      # <主域> / {base} / … 这类占位符
     if any(host == h or host.endswith("." + h) for h in ALLOWED_HOSTS):
@@ -139,21 +165,69 @@ def _is_unroutable_literal(host):
     """
     import ipaddress
     try:
-        ip = ipaddress.ip_address(host.strip("[]"))
+        ip = ipaddress.ip_address(host)
     except ValueError:
-        return False
+        # inet_aton 的旧式数字写法在各平台处理不同；自行解析，绝不请求 DNS。
+        # 前 n-1 段各占一个字节，最后一段占剩余字节（如 127.1）。
+        parts = host.split(".")
+        if not 1 <= len(parts) <= 4:
+            return False
+        numbers = []
+        for part in parts:
+            if re.fullmatch(r"0[xX][0-9a-fA-F]+", part):
+                number = int(part[2:], 16)
+            elif re.fullmatch(r"[0-9]+", part):
+                try:
+                    number = int(part, 8 if len(part) > 1 and part.startswith("0") else 10)
+                except ValueError:
+                    return False
+            else:
+                return False
+            numbers.append(number)
+        if any(number > 255 for number in numbers[:-1]) or numbers[-1] >= 256 ** (5 - len(parts)):
+            return False
+        value = numbers[-1] + sum(number << (8 * (3 - index)) for index, number in enumerate(numbers[:-1]))
+        ip = ipaddress.IPv4Address(value)
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
     return (ip.is_private or ip.is_loopback or ip.is_link_local
             or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
 
 
 def tracked_files():
-    r = subprocess.run(["git", "ls-files", "-z"], capture_output=True, text=True)
-    if r.returncode != 0:
-        return []
-    return [f for f in r.stdout.split("\0") if f]
+    return [f for f in git_text("ls-files", "-z").split("\0") if f]
 
 
-def scan_line(path, lineno, line, out):
+def git_text(*args):
+    result = subprocess.run(["git", *args], capture_output=True, timeout=120)
+    if result.returncode:
+        raise RuntimeError("无法读取 Git 对象（%s）" % args[0])
+    return result.stdout.decode("utf-8", "replace")
+
+
+def python_text_lines(text):
+    """保留字符串和注释的位置，模块名/属性表达式不是部署地址。
+
+    不按整行豁免 import：同一行的字符串、注释仍需检查。遇到不完整源码时
+    保留未能解析的部分，不能靠语法错误把后面的地址藏起来。
+    """
+    lines = text.splitlines(keepends=True)
+    masked = [list(line) for line in lines]
+    try:
+        for token in tokenize.generate_tokens(io.StringIO(text).readline):
+            if token.type not in (tokenize.NAME, tokenize.OP):
+                continue
+            (row, col), (_, end) = token.start, token.end
+            if row <= len(masked):
+                masked[row - 1][col:end] = " " * (end - col)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        pass
+    return ["".join(line) for line in masked]
+
+
+def scan_line(path, lineno, line, out, *, host_line=None):
+    if host_line is None:
+        host_line = "".join(python_text_lines(line)) if path.endswith(".py") else line
     for m in URL.finditer(line):
         if not host_allowed(m.group(1)):
             out.append((path, lineno, "绝对地址 %s" % m.group(0)[:72],
@@ -170,7 +244,7 @@ def scan_line(path, lineno, line, out):
         if not host_allowed(m.group(1)):
             out.append((path, lineno, "IP 地址 %s" % m.group(1),
                         "地址一律运行时取，源码与文档里不出现"))
-    for m in BARE_HOST.finditer(line):
+    for m in BARE_HOST.finditer(host_line):
         host = m.group(1)
         if EMAIL.search(line) and ("@" + host) in line:
             continue                     # 已按邮箱判过
@@ -186,27 +260,70 @@ def scan_line(path, lineno, line, out):
             break
 
 
+def scan_text(path, text, problems, label=None):
+    lines = text.splitlines()
+    host_lines = python_text_lines(text) if path.endswith(".py") else lines
+    for number, line in enumerate(lines, 1):
+        scan_line(label or path, number, line, problems, host_line=host_lines[number - 1])
+
+
+def scan_path(path, problems, label=None):
+    if path in FORBIDDEN_TRACKED:
+        problems.append((label or path, 0, "真实配置文件被纳入版本控制",
+                         "本地配置不入库；样例请命名为 *.example.*"))
+    # 路径不是 Python 代码；带源码后缀也不能将其中的域名当 import 忽略。
+    scan_line((label or path) + " [path]", 0, path, problems)
+
+
+def scan_commits(commits, problems):
+    """检查实际新增提交，而非可能与暂存区/推送分支不同的工作区。
+
+    每个提交检查新增/修改的 blob、路径及完整消息；根提交和合并提交也覆盖。
+    同一 blob 在同一路径只扫一次，已删除的旧泄露仍会在引入它的提交被发现。
+    """
+    seen = set()
+    for sha in dict.fromkeys(commits):
+        if not re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", sha):
+            raise ValueError("提交对象编号无效")
+        scan_text("commit-message", git_text("log", "-1", "--format=%B", sha),
+                  problems, sha[:12] + " [message]")
+        changed = set(git_text("diff-tree", "--root", "-r", "-m", "--no-commit-id",
+                               "--name-only", "--diff-filter=ACMRT", "-z", sha).split("\0"))
+        for record in git_text("ls-tree", "-r", "-z", "--full-tree", sha).split("\0"):
+            if not record:
+                continue
+            meta, path = record.split("\t", 1)
+            if path not in changed:
+                continue
+            _, kind, oid = meta.split()
+            label = sha[:12] + ":" + path
+            scan_path(path, problems, label)
+            if kind != "blob" or path in EXEMPT_PATHS or (path, oid) in seen:
+                continue
+            seen.add((path, oid))
+            text = git_text("cat-file", "blob", oid)
+            if "\0" not in text:
+                scan_text(path, text, problems, label)
+
+
 def main(argv):
     verbose = "--verbose" in argv
     problems = []
-
-    files = tracked_files()
-    for path in files:
-        if path in FORBIDDEN_TRACKED:
-            problems.append((path, 0, "真实配置文件被纳入版本控制",
-                             "本地配置不入库；样例请命名为 *.example.*"))
-
-    for path in files:
-        if path in EXEMPT_PATHS:
-            continue
-        if not path.endswith(SCAN_SUFFIXES):
-            continue
-        try:
-            with open(path, encoding="utf-8", errors="replace") as f:
-                for i, line in enumerate(f, 1):
-                    scan_line(path, i, line.rstrip("\n"), problems)
-        except OSError:
-            continue
+    if "--commits-stdin" in argv:
+        commits = sys.stdin.read().split()
+        scan_commits(commits, problems)
+        count = "%d 个新增提交" % len(set(commits))
+    else:
+        files = tracked_files()
+        for path in files:
+            scan_path(path, problems)
+            if path in EXEMPT_PATHS or not path.endswith(SCAN_SUFFIXES):
+                continue
+            if not os.path.exists(path):
+                continue  # 工作区删除的文件不在工作区自检范围，推送仍检查历史对象。
+            with open(path, encoding="utf-8", errors="replace") as source:
+                scan_text(path, source.read(), problems)
+        count = "%d 个受版本控制的文件" % len(files)
 
     # 同一处可能被多条规则命中（URL 与裸主机名会重叠），去重后再报。
     seen, deduped = set(), []
@@ -219,7 +336,7 @@ def main(argv):
     problems = deduped
 
     if verbose:
-        print("扫描 %d 个受版本控制的文件" % len(files))
+        print("扫描 " + count)
 
     if not problems:
         print("✔ 地址守卫通过：没有发现会跟着部署走的地址或凭证")
@@ -235,4 +352,8 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except Exception as exc:
+        print("地址守卫自身失败：%s；本次检查未完成" % type(exc).__name__, file=sys.stderr)
+        sys.exit(2)
