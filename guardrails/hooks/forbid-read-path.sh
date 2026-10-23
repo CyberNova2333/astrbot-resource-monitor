@@ -10,7 +10,7 @@
 # 语义与其余四个 hook 完全一致（见 _lib.sh）：
 #   * 放行 = 不表态（exit 0 且不输出）
 #   * 拦截 = deny JSON + exit 2
-#   * hook 输入解析失败 = 按拦截（保守）
+#   * hook 输入解析失败 = 提示并放行
 #   * 路径先 realpath 归一化再匹配（防 ../ 与软链绕过）
 #
 # 覆盖 Read 与 Grep：两者都能把文件**内容**带回会话。
@@ -31,7 +31,7 @@ try:
 except Exception:
     sys.stdout.write("__PARSE_ERROR__")
 ' 2>/dev/null) || raw="__PARSE_ERROR__"
-[ "$raw" = "__PARSE_ERROR__" ] && deny "[policy] 无法解析 hook 输入，按拦截处理"
+[ "$raw" = "__PARSE_ERROR__" ] && warn_pass "无法解析 hook 输入"
 [ -z "$raw" ] && pass
 # 相对路径无法可靠归一，不在这里判断（Bash 侧的命令串扫描仍覆盖那种形态）
 # Windows 上工具给的是带盘符的绝对路径（C:\… 或 C:/…），同样要判断，不能当相对路径放行

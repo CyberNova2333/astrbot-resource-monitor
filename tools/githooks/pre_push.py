@@ -36,7 +36,7 @@
 
 ### 三、地址不入库（CLAUDE.md 铁律 1）
 
-推送前跑一遍 tools/check-no-endpoints.py。这是本仓库唯一一条**碰了就是事故**的
+推送前用 tools/check-no-endpoints.py 扫实际新增提交的内容、路径与消息。这是本仓库唯一一条**碰了就是事故**的
 规则：真实域名/URL/凭证一旦进了公开历史就擦不掉——改一行代码容易，重写历史难，
 而且已经被人拉走的克隆里那份永远在。所以它必须在**推出去之前**拦，不能只在 CI 里
 事后报警。
@@ -96,7 +96,7 @@ def sh(*a, **kw):
 def parse_stdin():
     """stdin: <local ref> <local sha> <remote ref> <remote sha>，逐行。
 
-    返回 [(local_sha, branch, remote_sha)]，只含 refs/heads/ 且非删除的条目。
+    返回 [(local_sha, branch_or_ref, remote_sha)]，含分支、标签等非删除的条目。
     全零 OID = 「不存在」；长度随仓库哈希算法变（SHA-1 40 / SHA-256 64），
     所以按「全是 0」判，别写死 40。
     """
@@ -106,11 +106,10 @@ def parse_stdin():
         if len(parts) != 4:
             continue
         _, local_sha, remote_ref, remote_sha = parts
-        if not remote_ref.startswith("refs/heads/"):
-            continue
         if set(local_sha) == {"0"}:                  # 删除分支，放行
             continue
-        out.append((local_sha, remote_ref[len("refs/heads/"):], remote_sha))
+        branch = remote_ref[len("refs/heads/"):] if remote_ref.startswith("refs/heads/") else remote_ref
+        out.append((local_sha, branch, remote_sha))
     return out
 
 
@@ -119,7 +118,7 @@ def remote_name():
     return sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else "origin"
 
 
-def new_commits(local_sha, remote_sha):
+def new_commits(local_sha, remote_sha, *, all_content=False):
     """本次推送**新增**的提交 SHA 列表（不含合并提交）。
 
     已存在的分支用 remote..local，精确且不需要任何远端信息；新建分支用
@@ -130,10 +129,10 @@ def new_commits(local_sha, remote_sha):
         rng = ["%s..%s" % (remote_sha, local_sha)]
     else:
         rng = [local_sha, "--not", "--remotes=%s" % remote_name()]
-    r = sh("git", "rev-list", "--no-merges",
-           "--max-count=%d" % MAX_COMMITS, *rng)
+    options = [] if all_content else ["--no-merges", "--max-count=%d" % MAX_COMMITS]
+    r = sh("git", "rev-list", *options, *rng)
     if r.returncode != 0:
-        return []                                    # 算不出来就不查（fail-open）
+        raise RuntimeError("无法枚举本次推送的新增提交")
     return [x for x in r.stdout.split() if x]
 
 
@@ -181,18 +180,30 @@ def repo_root():
     return r.stdout.strip() if r.returncode == 0 else None
 
 
-def check_endpoints():
+def check_endpoints(refs):
     """跑地址守卫。返回它的输出（有问题时），没问题或跑不起来返回 None。"""
     root = repo_root()
     if not root:
+        sys.stderr.write("pre-push: 无法确定仓库目录，地址检查未完成，本次放行\n")
         return None
     guard = os.path.join(root, ENDPOINT_GUARD)
     if not os.path.isfile(guard):
+        sys.stderr.write("pre-push: 地址守卫缺失，本次放行\n")
         return None                                  # 守卫不在也放行
-    r = sh(sys.executable, guard, cwd=root)
+    commits = set()
+    for local_sha, _, remote_sha in refs:
+        commits.update(new_commits(local_sha, remote_sha, all_content=True))
+    if not commits:
+        return None
+    r = sh(sys.executable, guard, "--commits-stdin", cwd=root,
+           input="\n".join(sorted(commits)))
     if r.returncode == 0:
         return None
-    return (r.stdout or "") + (r.stderr or "")
+    output = (r.stdout or "") + (r.stderr or "")
+    if r.returncode == 1:
+        return output
+    sys.stderr.write("pre-push: 地址守卫自身失败，本次放行\n" + output)
+    return None
 
 
 def report_endpoints(out):
@@ -217,7 +228,8 @@ def main():
     else:
         try:
             bad = check_messages(refs)
-        except Exception:
+        except Exception as exc:
+            sys.stderr.write("pre-push: 提交信息检查自身失败（%s），本次放行\n" % type(exc).__name__)
             bad = []                                 # fail-open
         if bad:
             report_messages(bad)
@@ -228,8 +240,9 @@ def main():
         sys.stderr.write("pre-push: SKIP_ENDPOINT_HOOK=1，跳过地址守卫\n")
     else:
         try:
-            ep = check_endpoints()
-        except Exception:
+            ep = check_endpoints(refs)
+        except Exception as exc:
+            sys.stderr.write("pre-push: 地址检查自身失败（%s），本次放行\n" % type(exc).__name__)
             ep = None                                # fail-open
         if ep:
             report_endpoints(ep)
@@ -241,7 +254,7 @@ def main():
         return rc
 
     new_branches = [b for local_sha, b, remote_sha in refs
-                    if set(remote_sha) == {"0"}]
+                    if set(remote_sha) == {"0"} and not b.startswith("refs/")]
     if not new_branches:
         return rc
 

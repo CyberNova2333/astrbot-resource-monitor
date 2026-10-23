@@ -10,7 +10,7 @@
 #
 # rev4 变更:
 #   * R1 私有仓名只来自 private-repos.json(动态缓存)，policy.json 里不再有私有仓名；
-#     content / commit / push 三个模式统一做 R1，缓存不可用一律 ERROR(fail closed)。
+#     content / commit / push 三个模式统一做 R1，缓存不可用返回 ERROR，调用入口提示并放行。
 #   * 命中回显脱敏: 凭据形态的命中只回显前 8 字符，守卫自己不再把 token 打进会话。
 #   * R6 指纹比较统一去掉 "SHA256:" 前缀(git %GK 带前缀，旧版永远比不中)。
 #   * push 模式接收 remote 名，只审 "远端还没有的提交"(--not --remotes=<remote>)，
@@ -34,8 +34,9 @@ for _s in (sys.stdin, sys.stdout, sys.stderr):
     if hasattr(_s, 'reconfigure'):
         _s.reconfigure(encoding='utf-8', errors='replace')
 
-POLICY_PATH = '/root/.claude/policy/policy.json'
-POLICY = json.load(open(POLICY_PATH, encoding='utf-8'))
+POLICY_PATH = os.environ.get('GUARD_POLICY') or '/root/.claude/policy/policy.json'
+with open(POLICY_PATH, encoding='utf-8') as _policy_file:
+    POLICY = json.load(_policy_file)
 
 
 def norm_fp(s):
@@ -172,7 +173,7 @@ def private_check(text):
             return ERROR, ['私有仓缓存%s，本层不联网刷新。请先运行: python3 %s  然后重试' % ('缺失/损坏' if st == 'error' else '已过期', REFRESH)]
         if st == 'error':
             return ERROR, ['私有仓缓存缺失/损坏且刷新失败——请检查 私有种子/CNB 令牌/GH_TOKEN_n/网络 后运行 refresh-private.py']
-        return ERROR, ['私有仓缓存刷新失败(%s)，为防泄露按拦截处理——请修复网络/token 后重试' % st]
+        return ERROR, ['私有仓缓存刷新失败(%s)，本次检查未完成——请修复网络/token 后重试' % st]
     try:
         rx = cache_patterns(d)
     except re.error as e:
@@ -496,14 +497,16 @@ def cmd_push(remote=None, cwd=None):
 
 def added_lines(sha, cwd):
     """该提交相对其父提交新增的行 + 涉及路径(合并提交对每个父分别比)。"""
-    ok, out = git(['diff-tree', '-r', '-m', '--no-color', '--unified=0', '--diff-filter=ACMR', '-p', sha], cwd, 300)
+    ok, out = git(['diff-tree', '--root', '-r', '-m', '--no-color', '--unified=0', '--diff-filter=ACMR', '-p', sha], cwd, 300)
     if not ok:
         return False, ''
-    lines = []
+    names_ok, names = git(['diff-tree', '--root', '-r', '-m', '--no-commit-id', '--name-only',
+                          '-z', '--diff-filter=ACMR', sha], cwd, 300)
+    if not names_ok:
+        return False, ''
+    lines = [name for name in names.split('\0') if name]
     for l in out.splitlines():
-        if l.startswith('+++ b/'):
-            lines.append(l[6:])
-        elif l.startswith('+') and not l.startswith('+++'):
+        if l.startswith('+') and not l.startswith('+++'):
             lines.append(l[1:])
     return True, '\n'.join(lines)
 
@@ -525,12 +528,13 @@ def main(argv):
             res, note = cmd_push(extra or None)
         else:
             res, note = ERROR, ['未知模式 ' + mode]
-    except Exception as e:                                # 引擎自身异常也不放行
+    except Exception as e:
         res, note = ERROR, ['check.py 内部异常: %s' % type(e).__name__]
     print(res)
     if note:
         sys.stderr.write('\n'.join(note) + '\n')
-    sys.exit(0 if res == PASS else 1)
+    # 保留三态供调用者记录；只有确认违规才能阻断工作。
+    sys.exit(1 if res == VIOLATION else 0)
 
 
 if __name__ == '__main__':

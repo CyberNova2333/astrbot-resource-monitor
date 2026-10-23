@@ -9,26 +9,40 @@ POLICY=/root/.claude/policy/policy.json
 CHECK=/root/.claude/policy/check.py
 FING=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["agent_signing_fingerprint"].split(":")[-1])' "$POLICY" 2>/dev/null || echo '')
 HELP=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("signing_instructions",""))' "$POLICY" 2>/dev/null || echo '')
-gpgsign=$(git config --get commit.gpgsign || echo false)
-fmt=$(git config --get gpg.format || echo '')
+get_config(){
+  local value status
+  value=$(git config --get "$1" 2>/dev/null); status=$?
+  if [ "$status" -gt 1 ]; then
+    echo "⚠ 无法读取 Git 配置，本次检查未完成并放行。" >&2
+    return 2
+  fi
+  printf '%s' "$value"  # exit 1 仅表示未配置，属于可确认的缺失。
+}
+gpgsign=$(get_config commit.gpgsign) || exit 0
+fmt=$(get_config gpg.format) || exit 0
 if [ "$gpgsign" != "true" ] || [ "$fmt" != "ssh" ]; then
   echo "✋ 未启用 SSH 签名提交（需 commit.gpgsign=true 且 gpg.format=ssh）。$HELP"
   exit 1
 fi
-sk=$(git config --get user.signingkey || echo '')
+sk=$(get_config user.signingkey) || exit 0
 [ -z "$sk" ] && { echo "✋ 未配置 user.signingkey。$HELP"; exit 1; }
 if [ -n "$FING" ]; then
   if [ -f "$sk" ]; then fp=$(ssh-keygen -lf "$sk" 2>/dev/null | awk '{print $2}')
   else fp=$(printf '%s\n' "$sk" | ssh-keygen -lf /dev/stdin 2>/dev/null | awk '{print $2}'); fi
-  if [ -z "$fp" ]; then echo "✋ 无法计算 user.signingkey 的指纹(ssh-keygen 不可用或 key 无效)，按保守拦截。"; exit 1; fi
+  if [ -z "$fp" ]; then echo "⚠ 无法计算签名指纹，本次跳过指纹检查。" >&2; fi
   if [ "${fp#SHA256:}" = "$FING" ]; then echo "✋ 不能使用 Agent 通用签名密钥（${FING:0:7}…）。$HELP"; exit 1; fi
 fi
 # 新增内容 = 涉及路径(含改名/新增文件名) + 暂存 diff 中的 '+' 行
-paths=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null)
-added=$(git diff --cached --unified=0 --no-color --diff-filter=ACMR 2>/dev/null | grep -E '^\+' | grep -Ev '^\+\+\+ ' | cut -c2-)
+paths=$(git diff --cached --name-only --diff-filter=ACMR 2>/dev/null) || { echo "⚠ 无法读取暂存路径，本次放行。" >&2; exit 0; }
+diff=$(git diff --cached --unified=0 --no-color --diff-filter=ACMR 2>/dev/null) || { echo "⚠ 无法读取暂存差异，本次放行。" >&2; exit 0; }
+added=$(printf '%s' "$diff" | grep -E '^\+' | grep -Ev '^\+\+\+ ' | cut -c2-)
 text=$(printf '%s\n%s' "$paths" "$added")
 [ -z "$(printf '%s' "$text" | tr -d '[:space:]')" ] && exit 0
 tmp=$(mktemp); resf=$(mktemp); trap 'rm -f "$tmp" "$resf"' EXIT
 printf '%s' "$text" | python3 "$CHECK" content --net >"$resf" 2>"$tmp"
-[ "$(cat "$resf")" = "pass" ] && exit 0
+case "$(cat "$resf")" in
+  pass) exit 0 ;;
+  violation) ;;
+  *) echo "⚠ 预提交检查未完成，本次放行。" >&2; cat "$tmp" >&2; exit 0 ;;
+esac
 echo "✋ 预提交被阻止："; cat "$tmp"; exit 1

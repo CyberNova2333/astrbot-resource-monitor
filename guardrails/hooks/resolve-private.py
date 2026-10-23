@@ -10,8 +10,7 @@
 #     一家来源都没有 => error(拦)：没有依据时不放行。
 #   * GitHub: 裸名对缓存/种子里的每个 owner 逐个查 GET /repos/{owner}/{name}；优先用 refresh 记录的"该 owner 对应的 token"。
 #     200 -> private/public；404/403 -> 该 token 看不到，换下一把；网络/5xx/超时 -> 重试 1 次后算 error。
-#     所有 token 都答不上来时再问 gh(没有 token 时同样问)。token 与 gh 的可见范围不一定相同，
-#     所以 gh 不是"仅当没有 token 时"的兜底；漏判会导致私有仓名外泄，多判只是多拦一个名字。
+#     仅在缓存记录 gh 成功参与刷新时再问 gh；没有配置的可选来源不参与判断。
 #   * CNB: 裸名对缓存里 refresh 记录的每个组织路径(cnb_groups)查 GET /{组织路径}/{name}；200 看 visibility_level，
 #     非 Public 即 private；404/403 -> 看不到；其余 -> error。owner/repo 形态只查该 owner 恰好是某个组织路径末段的那些。
 #   * 被问到的来源都说看不到 -> absent(不是任何已知 owner 的私有仓 => 放行)；有来源报错 -> error(拦)。
@@ -126,7 +125,9 @@ def cnb_api(group_path, repo, tok):
     return 'error'
 
 
-def resolve_github(name, owners, toks, token_owners):
+def resolve_github(name, owners, toks, token_owners, *, use_gh=False):
+    if not toks and not use_gh:
+        return {'status': 'error', 'owner': ''}
     if '/' in name:
         o, repo = name.split('/', 1); owners = [o]
     else:
@@ -142,8 +143,7 @@ def resolve_github(name, owners, toks, token_owners):
                 got = r; break
             if r == 'error':
                 any_error = True
-        if got is None:
-            # 没有 token，或者所有 token 都答不上来 —— 两种情况都要问 gh(对等来源，不是末位兜底)。
+        if got is None and use_gh:
             r = gh_api(o, repo)
             if r in ('private', 'public'):
                 got = r
@@ -194,7 +194,14 @@ def main(names):
     srcs = cache.get('sources', [])
     use_github = any(s == 'gh' or s.startswith('token') for s in srcs)
     use_cnb = 'cnb' in srcs
-    toks = tokens(); ctok = cnb_token() if use_cnb else None
+    available = tokens()
+    # source 与环境变量的对应由 refresh 留下；旧缓存按相同枚举顺序兼容。
+    if token_owners:
+        toks = {key: value for key, value in available.items() if key in token_owners}
+    else:
+        toks = {key: value for index, (key, value) in enumerate(available.items(), 1)
+                if 'token%d' % index in srcs}
+    ctok = cnb_token() if use_cnb else None
     neg = load(NEG); now = time.time(); out = {}
     for n in names:
         key = n.casefold()
@@ -203,7 +210,7 @@ def main(names):
             out[n] = {'status': e['status'], 'owner': e.get('owner', ''), 'cached': True}; continue
         results = []
         if use_github and owners:
-            results.append(resolve_github(n, owners, toks, token_owners))
+            results.append(resolve_github(n, owners, toks, token_owners, use_gh='gh' in srcs))
         if use_cnb and ctok and cache.get('cnb_groups'):
             results.append(resolve_cnb(n, cache.get('cnb_groups', []), ctok))
         if not results:

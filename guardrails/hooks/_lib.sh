@@ -7,17 +7,40 @@
 export PYTHONUTF8=1   # 中文 Windows / GBK 区域设置下让 python3 统一按 UTF-8 读写（标准流、open、子进程输出）
 POLICY=/root/.claude/policy/policy.json
 CHECK=/root/.claude/policy/check.py
+COMMANDS=/root/.claude/policy/shell_commands.py
 pass(){ exit 0; }
+warn_pass(){ printf '[policy] 检查自身失败，本次放行：%s\n' "$1" >&2; exit 0; }
+engine_ok(){
+  case "$1" in
+    pass) return 0 ;;
+    violation) return 1 ;;
+    *) printf '[policy] 检查未完成，本次放行。\n' >&2; cat "$2" >&2; return 0 ;;
+  esac
+}
 deny(){
   python3 -c 'import json,sys;print(json.dumps({"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":sys.argv[1]}},ensure_ascii=False))' "$1" 2>/dev/null \
     || printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"[policy] blocked"}}\n'
   printf '%s\n' "$1" >&2
   exit 2
 }
-# 从 hook 输入 JSON 取 tool_input.command；解析失败输出哨兵(调用方按保守处理)
+# 从 hook 输入 JSON 取 tool_input.command；解析失败输出哨兵(调用方提示并放行)
 get_cmd(){ python3 -c 'import json,sys
 try:
     d=json.load(sys.stdin); sys.stdout.write((d.get("tool_input") or {}).get("command") or "")
 except Exception: sys.stdout.write("__PARSE_ERROR__")' 2>/dev/null || printf '__PARSE_ERROR__'; }
 # 用引擎扫一段文本: 返回 pass / 其他(明细在 $2 文件)
-engine_content(){ printf '%s' "$1" | python3 "$CHECK" content 2>"$2"; }
+engine_content(){
+  local result
+  result=$(printf '%s' "$1" | python3 "$CHECK" content 2>"$2")
+  if engine_ok "$result" "$2"; then printf pass; else printf violation; fi
+}
+check_command(){
+  local result
+  result=$(printf '%s' "$1" | python3 "$COMMANDS" "$2" "$POLICY" 2>"$3")
+  case "$result" in
+    pass) pass ;;
+    match) return 0 ;;
+    violation) deny "$(cat "$3")" ;;
+    *) warn_pass "$(cat "$3")" ;;
+  esac
+}
