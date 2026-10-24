@@ -66,6 +66,58 @@ MAX_FIELD = 160          # 单个字段（线路名、一句说明）
 MAX_MESSAGE = 3000       # 整条消息——再长的告警没人读，只会把群顶掉
 
 
+class RenderedMessage(str):
+    """文本与受信任的发送选项分开；平台提及由适配层构造消息组件。"""
+
+    def __new__(cls, text: str, *, at_all: bool = False,
+                keys: Sequence[str] = (), kind: str = ""):
+        message = super().__new__(cls, text)
+        message.at_all = bool(at_all)
+        message.keys = tuple(keys)
+        message.kind = kind
+        return message
+
+
+MIRROR_PROBES = frozenset({PROBE_MANIFEST, PROBE_CHUNK, PROBE_RANGE,
+                           PROBE_SPEED, PROBE_VERSION, PROBE_HOTPKG,
+                           PROBE_CONSISTENCY})
+
+
+def _mirror(result: ProbeResult, mirror_names: Sequence[str] = ()) -> Optional[str]:
+    if result.probe not in MIRROR_PROBES:
+        return None
+    explicit = result.extra.get("mirror")
+    if isinstance(explicit, str):
+        return explicit if not mirror_names or explicit in mirror_names else None
+    # 兼容旧状态；现存线路名优先精确匹配，再按最长前缀匹配文件目标。
+    if mirror_names:
+        if result.target in mirror_names:
+            return result.target
+        return next((name for name in sorted(mirror_names, key=len, reverse=True)
+                     if result.target.startswith(name + "#")), None)
+    return result.target.split("#", 1)[0]
+
+
+def _all_down(group: Sequence[Notification], enabled_mirrors: int,
+              mirror_names: Sequence[str] = ()) -> bool:
+    if not group or group[0].kind == "recover" or enabled_mirrors < 2:
+        return False
+    failed = {_mirror(n.result, mirror_names) for n in group
+              if n.result.counts_as_failure()}
+    failed.discard(None)
+    return len(failed) >= enabled_mirrors
+
+
+def all_mirrors_down(results: Sequence[ProbeResult], mirror_names: Sequence[str]) -> bool:
+    """供通知层记录某一探针的整体升级；调用方按探针分别传入。"""
+    expected = set(mirror_names)
+    if len(expected) < 2:
+        return False
+    failed = {_mirror(result, mirror_names) for result in results
+              if result.counts_as_failure()}
+    return expected.issubset(failed)
+
+
 def safe(text, limit: int = MAX_FIELD) -> str:
     """把一段**不是我们写的**文字弄成可以安全念进群里的样子。
 
@@ -118,7 +170,9 @@ def _clock(ts: float) -> str:
     return time.strftime("%H:%M", time.localtime(ts)) if ts else "未知"
 
 
-def group_notifications(notes: Sequence[Notification], enabled_mirrors: int
+def group_notifications(notes: Sequence[Notification], enabled_mirrors: int, *,
+                        active_results: Sequence[ProbeResult] = (),
+                        mirror_names: Sequence[str] = ()
                         ) -> List[List[Notification]]:
     """把同一探针的多条告警并成一组，顺序保持稳定（便于测试与阅读）。"""
     groups: Dict[str, List[Notification]] = {}
@@ -129,30 +183,47 @@ def group_notifications(notes: Sequence[Notification], enabled_mirrors: int
             groups[key] = []
             order.append(key)
         groups[key].append(n)
+    for group in groups.values():
+        head = group[0]
+        if head.kind == "recover":
+            continue
+        present = {note.result.key for note in group}
+        active = [Notification(head.kind, result.severity, result,
+                               since=head.since,
+                               duration_seconds=head.duration_seconds)
+                  for result in active_results
+                  if result.probe == head.result.probe
+                  and result.counts_as_failure() and result.key not in present]
+        # 只有全线路受影响才补齐跨轮次成员；普通单线通知不反复带上旧故障。
+        if _all_down(group + active, enabled_mirrors, mirror_names):
+            group.extend(active)
     return [groups[k] for k in order]
 
 
-def escalated_severity(group: Sequence[Notification], enabled_mirrors: int) -> Severity:
+def escalated_severity(group: Sequence[Notification], enabled_mirrors: int, *,
+                       mirror_names: Sequence[str] = ()) -> Severity:
     """全部线路都挂同一个环节 → P0。级别跟着用户影响走，不跟技术严重性走。"""
     if not group:
         return Severity.INFO
-    base = group[0].severity
+    severity_order = {Severity.P0: 0, Severity.P1: 1, Severity.P2: 2, Severity.INFO: 3}
+    base = min((n.severity for n in group), key=severity_order.get)
     if group[0].kind == "recover":
         return Severity.INFO
-    if enabled_mirrors >= 2 and len(group) >= enabled_mirrors and base != Severity.P0:
+    if _all_down(group, enabled_mirrors, mirror_names):
         return Severity.P0
     return base
 
 
 def render_group(group: Sequence[Notification], *, enabled_mirrors: int = 0,
                  prefix: str = "", at_all: bool = False,
+                 mirror_names: Sequence[str] = (),
                  upstream_line: str = "",
                  extra_lines: Optional[Sequence[str]] = None) -> str:
     """渲染一组同类通知。"""
     if not group:
         return ""
     head = group[0]
-    sev = escalated_severity(group, enabled_mirrors)
+    sev = escalated_severity(group, enabled_mirrors, mirror_names=mirror_names)
     probe = head.result.probe
     tag = ("【%s】" % prefix) if prefix else ""
 
@@ -164,12 +235,13 @@ def render_group(group: Sequence[Notification], *, enabled_mirrors: int = 0,
             if n.duration_seconds:
                 lines.append("  故障持续了 %s（%s 起）"
                              % (human_duration(n.duration_seconds), _clock(n.since)))
-        return clamp("\n".join(lines))
+        return RenderedMessage(clamp("\n".join(lines)),
+                               keys=[n.result.key for n in group], kind=head.kind)
 
     # 标题里的目标名同样要净化：它来自配置源/清单，是最容易被拿来伪造
     # 「另一条告警」的位置——标题在最上面，看起来最像真的。
     title_scope = ("全部 %d 条线路" % enabled_mirrors
-                   if enabled_mirrors and len(group) >= enabled_mirrors > 1
+                   if _all_down(group, enabled_mirrors, mirror_names)
                    else ("%d 个目标" % len(group) if len(group) > 1
                          else safe(group[0].result.target, 60)))
     verb = "仍在失败" if head.kind == "remind" else "失败"
@@ -204,10 +276,9 @@ def render_group(group: Sequence[Notification], *, enabled_mirrors: int = 0,
             lines.append("  %s" % safe(extra, 300))
     # 只有**首次报**才 @ 全体：持续故障每 6 小时提醒一次，那几条再 @ 一遍
     # 全体，收到的人只会把这个 bot 屏蔽掉。
-    if at_all and sev == Severity.P0 and head.kind == "fire":
-        lines.append("")
-        lines.append("@全体成员")
-    return clamp("\n".join(lines))
+    return RenderedMessage(clamp("\n".join(lines)),
+                           at_all=at_all and sev == Severity.P0 and head.kind == "fire",
+                           keys=[n.result.key for n in group], kind=head.kind)
 
 
 def upstream_line(entry_ok: bool, entry_detail: str, entry_at: float = 0.0) -> str:
@@ -248,7 +319,7 @@ def render_status(results: Sequence[ProbeResult], *, muted_until: float = 0.0,
         lines.append("    %s" % safe(r.detail, 300))
     if coverage is not None and coverage.total:
         lines.append("")
-        lines.append("块校验覆盖率：%.1f%%（%d/%d 块，7 天窗口）"
+        lines.append("块校验覆盖率：%.1f%%（%d/%d 个线路分块，7 天窗口）"
                      % (coverage.percent, coverage.verified, coverage.total))
     return clamp("\n".join(lines))
 
@@ -258,10 +329,10 @@ def render_coverage(coverage: CoverageReport, window_days: float = 7.0) -> str:
     if not coverage.total:
         return "还没有拿到清单，说不出覆盖率——先看 /线路 状态 里的入口探针。"
     lines = ["抽样块校验覆盖率（%.0f 天窗口）" % window_days,
-             "  %.1f%%：%d/%d 块在窗口内验过"
+             "  %.1f%%：%d/%d 个线路分块在窗口内验过"
              % (coverage.percent, coverage.verified, coverage.total)]
     if coverage.stale:
-        lines.append("  %d 块验过但已经超出窗口（旧结论说明不了现在）" % coverage.stale)
+        lines.append("  %d 个线路分块验过但已经超出窗口（旧结论说明不了现在）" % coverage.stale)
     if coverage.verified and coverage.oldest_age_seconds:
         lines.append("  窗口内最久的一块是 %s 前验的"
                      % human_duration(coverage.oldest_age_seconds))

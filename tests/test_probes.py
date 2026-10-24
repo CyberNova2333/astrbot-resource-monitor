@@ -141,8 +141,10 @@ class ConsistencyTest(unittest.TestCase):
         stale = {"p.zip": FileEntry("p.zip", 20, 16, ["1" * 32] * 2)}
         results = probes.check_manifest_consistency(
             {"甲": good, "乙": dict(good), "丙": stale})
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].target, "丙#p.zip")
+        bad = [r for r in results if r.counts_as_failure()]
+        self.assertEqual(len(bad), 1)
+        self.assertEqual(bad[0].target, "丙#p.zip")
+        self.assertEqual(len([r for r in results if r.ok]), 2)
 
     def test_two_mirrors_disagreeing_is_unknown(self):
         """只有两条线路且互相矛盾时，监控说不清谁对——说不清就不报警。"""
@@ -193,8 +195,7 @@ class MirrorTargetTest(unittest.TestCase):
         self.assertTrue(all(not r.ok for r in bad))
 
     def test_domain_names_are_not_resolved(self):
-        """只认字面量地址：做 DNS 解析要么慢要么会被绕过，而且会误伤 CDN 域名。
-        宁可漏一个用域名伪装的，也不要拦下正常线路。"""
+        """快速筛选不预解析域名；真正连接时由 HTTP 连接器校验 DNS 结果。"""
         ok, bad = probes.check_mirror_targets(self._disc("https://cdn.example.test/"))
         self.assertEqual(len(ok), 1)
         self.assertEqual(bad, [])

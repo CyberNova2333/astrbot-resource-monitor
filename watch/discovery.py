@@ -29,10 +29,11 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Dict, List, Optional, Tuple
 
 from .http import HttpClient, HttpError, HttpResponse
-from .models import FileEntry, Mirror, OnlineConfig, VersionMeta
+from .models import MAX_METADATA_INTEGER, FileEntry, Mirror, OnlineConfig, VersionMeta
 
 MANIFEST_NAME = "manifest.json"
 
@@ -55,29 +56,60 @@ class ContentError(DiscoveryError):
     """
 
 
+def integer_field(value, default: int = 0) -> int:
+    """兼容整数字符串，但不把布尔、分数、非有限数悄悄当成有效大小。"""
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        raise ValueError("应为整数")
+    if isinstance(value, float) and (not math.isfinite(value) or not value.is_integer()):
+        raise ValueError("应为有限整数")
+    number = int(value)
+    if not -MAX_METADATA_INTEGER - 1 <= number <= MAX_METADATA_INTEGER:
+        raise ValueError("整数超出支持范围")
+    return number
+
+
+def parse_mirrors(items) -> Tuple[List[Mirror], List[str]]:
+    if items is None:
+        items = []
+    if not isinstance(items, list):
+        raise ContentError("mirrors 必须是数组")
+    mirrors: List[Mirror] = []
+    skipped: List[str] = []
+    seen = set()
+    for index, item in enumerate(items):
+        try:
+            if not isinstance(item, dict):
+                raise ValueError("线路条目不是对象")
+            base = item.get("base")
+            if not isinstance(base, str) or not base.startswith(("http://", "https://")):
+                raise ValueError("缺少有效 base")
+            name = item.get("name") or base
+            enabled = item.get("enabled", True)
+            weight = integer_field(item.get("weight"))
+            chunks = integer_field(item.get("chunks"))
+            if (not isinstance(name, str) or not isinstance(enabled, bool)
+                    or weight < 0 or chunks < 0 or name in seen):
+                raise ValueError("线路字段类型、范围或名称重复")
+            mirrors.append(Mirror(name=name, base=base, weight=weight,
+                                  chunks=chunks, enabled=enabled))
+            seen.add(name)
+        except (TypeError, ValueError, OverflowError) as exc:
+            skipped.append("第 %d 条：%s" % (index + 1, exc))
+    return mirrors, skipped
+
+
 def parse_online_config(body: bytes) -> OnlineConfig:
     try:
         raw = json.loads(body.decode("utf-8", errors="replace"))
-    except ValueError as e:
+    except (ValueError, RecursionError) as e:
         raise ContentError("线上配置不是合法 JSON：%s" % e)
     if not isinstance(raw, dict):
         raise ContentError("线上配置的顶层不是对象")
 
-    mirrors: List[Mirror] = []
-    for item in raw.get("mirrors") or []:
-        if not isinstance(item, dict):
-            continue
-        base = item.get("base")
-        if not isinstance(base, str) or not base.startswith(("http://", "https://")):
-            continue
-        mirrors.append(Mirror(
-            name=str(item.get("name") or base),
-            base=base,
-            weight=int(item.get("weight") or 0),
-            chunks=int(item.get("chunks") or 0),
-            enabled=bool(item.get("enabled", True)),
-        ))
-    return OnlineConfig(raw=raw, mirrors=mirrors)
+    mirrors, skipped = parse_mirrors(raw.get("mirrors"))
+    return OnlineConfig(raw=raw, mirrors=mirrors, invalid_mirrors=skipped)
 
 
 async def fetch_online_config(client: HttpClient, entry_url: str) -> Tuple[OnlineConfig, HttpResponse]:
@@ -110,7 +142,7 @@ def parse_manifest(body: bytes) -> Tuple[Dict[str, FileEntry], List[str]]:
     """
     try:
         raw = json.loads(body.decode("utf-8", errors="replace"))
-    except ValueError as e:
+    except (ValueError, RecursionError) as e:
         raise DiscoveryError("清单不是合法 JSON：%s" % e)
     if not isinstance(raw, dict):
         raise DiscoveryError("清单的顶层不是对象")
@@ -122,12 +154,17 @@ def parse_manifest(body: bytes) -> Tuple[Dict[str, FileEntry], List[str]]:
             skipped.append(str(name))
             continue
         chunks = meta.get("chunks")
-        entry = FileEntry(
-            name=str(name),
-            size=int(meta.get("size") or -1),
-            chunk_size=int(meta.get("chunk_size") or 0),
-            chunks=[str(h).strip().lower() for h in chunks] if isinstance(chunks, list) else [],
-        )
+        try:
+            entry = FileEntry(
+                name=str(name),
+                size=integer_field(meta.get("size"), -1),
+                chunk_size=integer_field(meta.get("chunk_size")),
+                chunks=[h.strip().lower() for h in chunks]
+                if isinstance(chunks, list) and all(isinstance(h, str) for h in chunks) else [],
+            )
+        except (TypeError, ValueError, OverflowError):
+            skipped.append(str(name))
+            continue
         if entry.is_valid():
             entries[entry.name] = entry
         else:
@@ -144,6 +181,8 @@ async def fetch_manifest(client: HttpClient, mirror: Mirror
         raise DiscoveryError("清单不可达：%s" % e)
     if resp.status != 200:
         raise DiscoveryError("清单返回 HTTP %d（期望 200）" % resp.status)
+    if resp.truncated:
+        raise ContentError("清单响应超过本地读取上限，内容不完整")
     entries, skipped = parse_manifest(resp.body)
     return entries, skipped, resp
 
@@ -151,14 +190,14 @@ async def fetch_manifest(client: HttpClient, mirror: Mirror
 def parse_version_meta(body: bytes) -> VersionMeta:
     try:
         raw = json.loads(body.decode("utf-8", errors="replace"))
-    except ValueError as e:
+    except (ValueError, RecursionError) as e:
         raise DiscoveryError("版本 json 不是合法 JSON：%s" % e)
     if not isinstance(raw, dict):
         raise DiscoveryError("版本 json 的顶层不是对象")
     try:
-        version = int(raw.get("version") or 0)
-        size = int(raw.get("size") or 0)
-    except (TypeError, ValueError):
+        version = integer_field(raw.get("version"))
+        size = integer_field(raw.get("size"))
+    except (TypeError, ValueError, OverflowError):
         version, size = 0, 0
     md5 = str(raw.get("md5") or "").strip().lower()
     return VersionMeta(version=version, size=size, md5=md5)
@@ -172,7 +211,7 @@ def declared_version_files(cfg: OnlineConfig) -> List[str]:
     names = watch.get("version_files")
     if not isinstance(names, list):
         return []
-    return [str(n).strip() for n in names if str(n).strip()]
+    return [n.strip() for n in names if isinstance(n, str) and n.strip()]
 
 
 def declared_package_for(cfg: OnlineConfig, version_file: str) -> Optional[str]:
@@ -184,4 +223,4 @@ def declared_package_for(cfg: OnlineConfig, version_file: str) -> Optional[str]:
     if not isinstance(mapping, dict):
         return None
     name = mapping.get(version_file)
-    return str(name) if name else None
+    return name if isinstance(name, str) and name else None

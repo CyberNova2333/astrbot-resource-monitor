@@ -16,10 +16,14 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+import sys
 from dataclasses import dataclass, field
 from typing import List, Optional
 from urllib.parse import urlparse
+
+from .discovery import ContentError, parse_mirrors
 
 
 class ConfigError(ValueError):
@@ -128,14 +132,26 @@ def _int(data: dict, key: str, default: int) -> int:
     v = data.get(key, default)
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         return default
-    return int(v)
+    try:
+        number = int(v)
+    except (ValueError, OverflowError) as exc:
+        raise ConfigError("%s 必须是有限数值" % key) from exc
+    if abs(number) > sys.maxsize:
+        raise ConfigError("%s 数值超出支持范围" % key)
+    return number
 
 
 def _float(data: dict, key: str, default: float) -> float:
     v = data.get(key, default)
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         return default
-    return float(v)
+    try:
+        number = float(v)
+    except (ValueError, OverflowError) as exc:
+        raise ConfigError("%s 必须是有限数值" % key) from exc
+    if not math.isfinite(number) or abs(number) > sys.maxsize:
+        raise ConfigError("%s 必须是支持范围内的有限数值" % key)
+    return number
 
 
 def _bool(data: dict, key: str, default: bool) -> bool:
@@ -163,21 +179,41 @@ def validate_entry_url(url: str) -> str:
             "     （那份 JSON 只要有 mirrors[]，其余字段有就多探两样）\n"
             "  2. 没有中心配置：source = {\"type\": \"mirrors\", "
             "\"mirrors\": [{\"name\": \"甲\", \"base\": \"https://a.example.test/\"}]}")
-    p = urlparse(url.strip())
-    if p.scheme not in ("http", "https") or not p.netloc:
+    normalized = url.strip()
+    try:
+        p = urlparse(normalized)
+        # hostname/port 的格式错误会在访问属性时才抛出，必须一并转换。
+        valid = (p.scheme in ("http", "https") and bool(p.hostname)
+                 and (p.port is None or p.port > 0)
+                 and not any(char.isspace() for char in normalized))
+    except ValueError as exc:
+        raise ConfigError("entry_url 不是合法的 http(s) 地址：%r" % url) from exc
+    if not valid:
         raise ConfigError("entry_url 不是合法的 http(s) 地址：%r" % url)
-    return url.strip()
+    return normalized
 
 
 def _mirror_from_line(item) -> dict:
     """`名称=https://…`、`https://…`、或者本来就是对象。"""
     if isinstance(item, dict):
         return item
-    text = str(item).strip()
+    if not isinstance(item, str):
+        raise ConfigError("mirrors 的线路条目必须是对象或地址字符串")
+    text = item.strip()
     if "=" in text and not text.split("=", 1)[0].strip().startswith("http"):
         name, _, base = text.partition("=")
         return {"name": name.strip(), "base": base.strip()}
     return {"base": text}
+
+
+def _strings(value, label: str, *, allow_single: bool = False) -> List[str]:
+    if value is None:
+        return []
+    if allow_single and isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ConfigError("%s 必须是字符串数组" % label)
+    return [item.strip() for item in value if item.strip()]
 
 
 def normalize_source(data: dict) -> dict:
@@ -193,35 +229,47 @@ def normalize_source(data: dict) -> dict:
     插件在一台没配好的机器上「跑起来」，群里一片绿而其实什么都没探。
     """
     spec = data.get("source")
-    if isinstance(spec, dict) and spec.get("type"):
-        kind = str(spec["type"]).strip().lower()
+    if spec is not None and not isinstance(spec, dict):
+        raise ConfigError("source 必须是对象")
+    if isinstance(spec, dict) and spec:
+        if not isinstance(spec.get("type"), str) or not spec["type"].strip():
+            raise ConfigError("source.type 必须是配置源类型字符串")
+        kind = spec["type"].strip().lower()
         if kind in ("endpoint", "url", "config", "legacy-config"):
-            urls = spec.get("urls")
-            if isinstance(urls, str):
-                urls = [urls]
-            urls = [str(u).strip() for u in (urls or []) if str(u).strip()]
+            urls = _strings(spec.get("urls"), "endpoint.urls", allow_single=True)
             if not urls:
                 raise ConfigError("endpoint 源要给至少一个 urls")
             return {"type": "endpoint", "urls": [validate_entry_url(u) for u in urls]}
         if kind in ("mirrors", "static", "local"):
-            mirrors = []
-            for item in spec.get("mirrors") or []:
+            raw_mirrors = spec.get("mirrors")
+            if not isinstance(raw_mirrors, list):
+                raise ConfigError("mirrors 源的 mirrors 必须是对象数组")
+            normalized = []
+            for item in raw_mirrors:
                 if not isinstance(item, dict):
-                    continue
-                base = str(item.get("base") or "").strip()
-                if not base.startswith(("http://", "https://")):
-                    raise ConfigError("mirrors 源里的 base 必须是 http(s) 地址：%r" % base)
-                mirrors.append({"name": str(item.get("name") or base), "base": base,
-                                "weight": int(item.get("weight") or 0),
-                                "chunks": int(item.get("chunks") or 0),
-                                "enabled": bool(item.get("enabled", True))})
+                    raise ConfigError("mirrors 源的线路条目必须是对象")
+                if item.get("name") is not None and not isinstance(item["name"], str):
+                    raise ConfigError("mirrors 源的 name 必须是字符串")
+                normalized.append(dict(item, base=validate_entry_url(item.get("base"))))
+            try:
+                parsed, skipped = parse_mirrors(normalized)
+            except ContentError as exc:
+                raise ConfigError(str(exc)) from exc
+            if skipped:
+                raise ConfigError("mirrors 源的线路字段无效：%s" % "；".join(skipped[:3]))
+            mirrors = [{"name": m.name, "base": m.base, "weight": m.weight,
+                        "chunks": m.chunks, "enabled": m.enabled} for m in parsed]
             if not mirrors:
                 raise ConfigError("mirrors 源要给至少一条线路")
             packages = spec.get("packages")
+            if packages is None:
+                packages = {}
+            if not isinstance(packages, dict) or any(
+                    not isinstance(k, str) or not isinstance(v, str) for k, v in packages.items()):
+                raise ConfigError("mirrors 源的 packages 必须是字符串映射")
             return {"type": "mirrors", "mirrors": mirrors,
-                    "version_files": [str(x) for x in (spec.get("version_files") or [])],
-                    "packages": {str(k): str(v) for k, v in packages.items()}
-                    if isinstance(packages, dict) else {}}
+                    "version_files": _strings(spec.get("version_files"), "version_files"),
+                    "packages": dict(packages)}
         raise ConfigError("不认识的配置源类型：%r（可用：endpoint / mirrors）"
                           % spec.get("type"))
 
@@ -229,19 +277,20 @@ def normalize_source(data: dict) -> dict:
     # AstrBot 的配置表单只能给字符串列表，表达不了对象列表——与其让人去改
     # 本地 JSON 文件，不如把这种写法直接接住。
     raw_mirrors = data.get("mirrors")
+    if raw_mirrors is not None and not isinstance(raw_mirrors, list):
+        raise ConfigError("mirrors 必须是线路数组")
     if isinstance(raw_mirrors, list) and raw_mirrors and not data.get("entry_url"):
         return normalize_source({"source": {
             "type": "mirrors",
             "mirrors": [_mirror_from_line(x) for x in raw_mirrors],
-            "version_files": data.get("version_files") or [],
-            "packages": data.get("packages") or {}}})
+            "version_files": data.get("version_files"),
+            "packages": data.get("packages")}})
 
-    raw_urls = data.get("entry_urls")
-    if isinstance(raw_urls, str):
-        raw_urls = [raw_urls]
-    urls = [str(u).strip() for u in (raw_urls or []) if str(u).strip()] \
-        if isinstance(raw_urls, list) else []
-    primary = _str(data, "entry_url")
+    urls = _strings(data.get("entry_urls"), "entry_urls", allow_single=True)
+    primary = data.get("entry_url")
+    if primary is not None and not isinstance(primary, str):
+        raise ConfigError("entry_url 必须是地址字符串")
+    primary = primary.strip() if primary else ""
     if primary:
         urls = [primary] + [u for u in urls if u != primary]
     if not urls:
@@ -314,13 +363,13 @@ def from_mapping(data: dict) -> LocalConfig:
 
 
 def from_file(path: str) -> LocalConfig:
-    if not os.path.isfile(path):
-        raise ConfigError("找不到本地配置文件：%s（样例见 config.example.json）" % path)
-    with open(path, "r", encoding="utf-8") as f:
-        try:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        except ValueError as e:
-            raise ConfigError("本地配置不是合法 JSON：%s" % e)
+    except OSError as exc:
+        raise ConfigError("无法读取本地配置文件：%s（样例见 config.example.json）" % path) from exc
+    except (ValueError, RecursionError) as exc:
+        raise ConfigError("本地配置不是合法 JSON：%s" % exc) from exc
     # 样例里的注释字段（"comment"）无害，直接忽略
     return from_mapping(data)
 

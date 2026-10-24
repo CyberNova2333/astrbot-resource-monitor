@@ -8,10 +8,12 @@
 import asyncio
 import hashlib
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from tests.fakes import FakeClient, manifest_for, range_response
 from watch.config import from_mapping
 from watch.runner import Monitor
+from watch.models import ProbeResult
 
 ENTRY_URL = "https://api.example.test/path/config.json"
 A = "https://a.example.test/"
@@ -48,7 +50,9 @@ def healthy_client() -> FakeClient:
 
 
 def run(coro):
-    return asyncio.run(coro)
+    with patch("watch.probes.probe_tls_expiry", new=AsyncMock(
+            return_value=ProbeResult(True, "证书有效期", "测试证书", "正常"))):
+        return asyncio.run(coro)
 
 
 class HealthyTest(unittest.TestCase):
@@ -62,7 +66,7 @@ class HealthyTest(unittest.TestCase):
         m = Monitor(cfg(), healthy_client())
         out = run(m.run_cycle(now=1000))
         self.assertEqual(out.coverage.verified, 1)
-        self.assertAlmostEqual(out.coverage.percent, 100.0)
+        self.assertAlmostEqual(out.coverage.percent, 50.0)
 
     def test_mirrors_take_turns(self):
         """每轮换一条线路验块：N 条线路 × 每块全验一遍的流量账单会炸。"""

@@ -36,8 +36,9 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 from . import discovery
-from .http import DigestResult, HttpClient, HttpError, elapsed_ms, kbps
-from .models import FileEntry, Mirror, ProbeResult, Severity, VersionMeta
+from .http import (MAX_BUFFER_BYTES, DigestResult, HttpClient, HttpError, elapsed_ms,
+                   kbps, require_public_address, validate_public_url)
+from .models import FileEntry, Mirror, ProbeResult, Severity, VersionMeta, entry_fingerprint
 from .sources import Discovered, KEY_SOURCE
 
 PROBE_SANITY = "线上配置合理性"
@@ -59,6 +60,12 @@ CONTENT_RANGE = re.compile(r"^bytes\s+(\d+)-(\d+)/(\d+)$", re.I)
 def manifest_key(mirror: Mirror) -> str:
     """某条线路的清单探针键。线路上的其余探针都挂在它下面。"""
     return "%s|%s" % (PROBE_MANIFEST, mirror.name)
+
+
+def _mirror_result(mirror: Mirror, **kwargs) -> ProbeResult:
+    extra = dict(kwargs.pop("extra", {}))
+    extra["mirror"] = mirror.name
+    return ProbeResult(extra=extra, **kwargs)
 
 
 # ────────────────────────────────────────────────────────────────
@@ -87,6 +94,11 @@ def check_config_mutation(disc: Discovered, last_snapshot: Optional[dict]
             detail="启用的线路从 %d 条掉到 %d 条——改配置时手滑关掉一批，"
                    "剩下的会被瞬间打满" % (prev_count, now_count),
             severity=Severity.P0, suppress_key=KEY_ENTRY))
+    else:
+        out.append(ProbeResult(
+            ok=True, probe=PROBE_SANITY, target="线路表突变",
+            detail="启用线路数没有异常减少", severity=Severity.P0,
+            suppress_key=KEY_ENTRY))
 
     if prev.settings and not disc.settings:
         out.append(ProbeResult(
@@ -94,6 +106,11 @@ def check_config_mutation(disc: Discovered, last_snapshot: Optional[dict]
             detail="settings 段没了——客户端会退回内置默认值，实际行为与你以为的"
                    "不一样，而且监控这边的速率判据也跟着失效",
             severity=Severity.P1, suppress_key=KEY_ENTRY))
+    else:
+        out.append(ProbeResult(
+            ok=True, probe=PROBE_SANITY, target="阈值段消失",
+            detail="阈值段没有异常消失", severity=Severity.P1,
+            suppress_key=KEY_ENTRY))
     return out
 
 
@@ -105,30 +122,22 @@ def check_mirror_targets(disc: Discovered) -> Tuple[List[Mirror], List[ProbeResu
     机自己的内网——这是拿监控当跳板的经典形状（SSRF）。监控没有凭证，能捞到的
     有限，但「替远端内容访问内网」这件事本身就不该发生。
 
-    判据刻意只认**字面量地址**，不做 DNS 解析：解析要么慢要么会被 TOCTOU 绕过，
-    而且 CDN 域名解析出的地址千奇百怪，一做就会误伤。宁可漏一个用域名伪装的，
-    也不要拦下正常线路（守卫误伤一次，之后就没人信它了）。
+    这里先筛字面量和 URL 结构；DNS 与重定向在 HTTP 连接层检查，使用检查过的
+    同一批地址建立连接，避免预解析后重查带来的竞态。
     """
-    import ipaddress
-
     ok_mirrors: List[Mirror] = []
     out: List[ProbeResult] = []
     for m in disc.enabled_mirrors:
         host = _host_of(m.base)
-        blocked = host.lower() in ("localhost", "localhost.localdomain")
-        if not blocked:
-            try:
-                ip = ipaddress.ip_address(host.strip("[]"))
-                blocked = (ip.is_private or ip.is_loopback or ip.is_link_local
-                           or ip.is_reserved or ip.is_multicast)
-            except ValueError:
-                blocked = False              # 是域名，不解析，放行
-        if blocked:
+        try:
+            validate_public_url(m.base)
+        except HttpError:
             out.append(ProbeResult(
                 ok=False, probe=PROBE_SANITY, target=m.name,
                 detail="线路指向本机/内网地址（%s），已拒绝探测——配置源是远端"
                        "内容，不该能指挥监控去敲部署机自己的内网" % host,
-                severity=Severity.P1, suppress_key=KEY_ENTRY))
+                severity=Severity.P1, suppress_key=KEY_ENTRY,
+                extra={"mirror": m.name}))
             continue
         ok_mirrors.append(m)
     return ok_mirrors, out
@@ -213,13 +222,13 @@ async def probe_manifest(client: HttpClient, mirror: Mirror
     try:
         entries, skipped, resp = await discovery.fetch_manifest(client, mirror)
     except discovery.DiscoveryError as e:
-        return ProbeResult(
+        return _mirror_result(mirror,
             ok=False, probe=PROBE_MANIFEST, target=mirror.name,
             detail=str(e), elapsed_ms=elapsed_ms(t0), severity=Severity.P1,
             suppress_key=KEY_ENTRY), {}
 
     if not entries:
-        return ProbeResult(
+        return _mirror_result(mirror,
             ok=False, probe=PROBE_MANIFEST, target=mirror.name,
             detail="清单里没有一条可用条目（%d 条被判为坏条目）" % len(skipped),
             elapsed_ms=resp.elapsed_ms, severity=Severity.P1,
@@ -228,7 +237,7 @@ async def probe_manifest(client: HttpClient, mirror: Mirror
     detail = "OK，%d 个文件" % len(entries)
     if skipped:
         detail += "；%d 条坏条目被跳过：%s" % (len(skipped), "、".join(skipped[:3]))
-    return ProbeResult(
+    return _mirror_result(mirror,
         ok=not skipped, probe=PROBE_MANIFEST, target=mirror.name,
         detail=detail, elapsed_ms=resp.elapsed_ms,
         severity=Severity.P1 if skipped else Severity.P1,
@@ -243,34 +252,39 @@ async def probe_manifest(client: HttpClient, mirror: Mirror
 async def probe_chunk(client: HttpClient, mirror: Mirror, entry: FileEntry,
                       index: int, min_speed_kbps: Optional[float] = None
                       ) -> List[ProbeResult]:
-    """取一块回来，比 MD5。返回 1~2 条结果（内容 + 可选的速率）。
+    """取一块回来，比 MD5，分别给出内容、Range 与速率结果。
 
     **刻意不带 no-cache 头**：这一探要看的正是「用户现在会拿到什么」，包括
     这条线路的缓存里躺着的那份。压掉缓存等于把最想抓的故障绕过去了。
     """
     target = "%s#%s[%d]" % (mirror.name, entry.name, index)
-    if index < 0 or index >= entry.count:
-        return [ProbeResult(ok=True, probe=PROBE_CHUNK, target=target,
-                            detail="块序号超出清单范围，跳过", unknown=True,
+    if not entry.is_valid() or index < 0 or index >= entry.count:
+        return [_mirror_result(mirror, ok=True, probe=PROBE_CHUNK, target=target,
+                            detail="清单条目或块序号无效，跳过", unknown=True,
                             suppress_key=manifest_key(mirror))]
 
     start, end = entry.range_for(index)
     want = entry.chunks[index]
     expect_len = end - start + 1
+    if expect_len > MAX_BUFFER_BYTES:
+        return [_mirror_result(
+            mirror, ok=True, probe=PROBE_CHUNK, target=target,
+            detail="清单块大小超过本地内存安全上限，本轮不下载该块", unknown=True,
+            suppress_key=manifest_key(mirror))]
     url = mirror.url_for(entry.name)
     t0 = time.monotonic()
     try:
         resp = await client.fetch(url, headers={"Range": "bytes=%d-%d" % (start, end)},
                                   max_bytes=expect_len + 1024)
     except HttpError as e:
-        return [ProbeResult(ok=False, probe=PROBE_CHUNK, target=target,
+        return [_mirror_result(mirror, ok=False, probe=PROBE_CHUNK, target=target,
                             detail="连接失败：%s" % e, elapsed_ms=elapsed_ms(t0),
                             severity=Severity.P1, suppress_key=manifest_key(mirror))]
 
     if resp.status == 200:
         # 服务器忽略了 Range，把整个文件给了我们。这本身就是故障：客户端的分片
         # 下载会退化成整包重下，表现是「网特别慢」而不是「失败」。
-        return [ProbeResult(
+        return [_mirror_result(mirror,
             ok=False, probe=PROBE_RANGE, target=mirror.name,
             detail="不支持 Range（返回 200，期望 206）——分片下载会退化成整包重下，"
                    "用户看到的是『下载特别慢』",
@@ -278,55 +292,70 @@ async def probe_chunk(client: HttpClient, mirror: Mirror, entry: FileEntry,
             suppress_key=manifest_key(mirror))]
 
     if resp.status != 206:
-        return [ProbeResult(
+        return [_mirror_result(mirror,
             ok=False, probe=PROBE_CHUNK, target=target,
             detail="HTTP %d（期望 206）" % resp.status, elapsed_ms=resp.elapsed_ms,
             severity=Severity.P1, suppress_key=manifest_key(mirror))]
 
     cr = CONTENT_RANGE.match(resp.header("content-range").strip())
-    if cr and int(cr.group(3)) != entry.size:
-        return [ProbeResult(
+    try:
+        bounds = tuple(int(value) for value in cr.groups()) if cr else None
+    except ValueError:
+        bounds = None
+    if bounds is None or bounds[:2] != (start, end):
+        return [_mirror_result(
+            mirror, ok=False, probe=PROBE_CHUNK, target=target,
+            detail="Content-Range 缺失或与请求的块区间不符",
+            elapsed_ms=resp.elapsed_ms, severity=Severity.P1,
+            suppress_key=manifest_key(mirror))]
+    range_ok = _mirror_result(
+        mirror, ok=True, probe=PROBE_RANGE, target=mirror.name,
+        detail="Range 响应正常", elapsed_ms=resp.elapsed_ms,
+        severity=Severity.P1, suppress_key=manifest_key(mirror))
+    if bounds[2] != entry.size:
+        return [_mirror_result(mirror,
             ok=False, probe=PROBE_CHUNK, target=target,
             detail="文件总长与清单不符：清单 %d，这条线路 %s"
                    "（多半是这条线路上还是旧版本）" % (entry.size, cr.group(3)),
             elapsed_ms=resp.elapsed_ms, severity=Severity.P1,
-            suppress_key=manifest_key(mirror))]
+            suppress_key=manifest_key(mirror)), range_ok]
 
     got = resp.body
-    if len(got) != expect_len:
-        return [ProbeResult(
+    if resp.truncated or len(got) != expect_len:
+        return [_mirror_result(mirror,
             ok=False, probe=PROBE_CHUNK, target=target,
             detail="收到 %d 字节，期望 %d 字节" % (len(got), expect_len),
             elapsed_ms=resp.elapsed_ms, severity=Severity.P1,
-            suppress_key=manifest_key(mirror))]
+            suppress_key=manifest_key(mirror)), range_ok]
 
     digest = hashlib.md5(got).hexdigest()
     if digest != want:
-        return [ProbeResult(
+        return [_mirror_result(mirror,
             ok=False, probe=PROBE_CHUNK, target=target,
             detail="内容不符：清单 %s… 实得 %s…（这条线路多半缓存了旧版本或"
                    "半截文件）" % (want[:12], digest[:12]),
             elapsed_ms=resp.elapsed_ms, severity=Severity.P1,
-            suppress_key=manifest_key(mirror))]
+            suppress_key=manifest_key(mirror)), range_ok]
 
     speed = kbps(len(got), resp.elapsed_ms)
-    out = [ProbeResult(
+    out = [_mirror_result(mirror,
         ok=True, probe=PROBE_CHUNK, target=target,
         detail="OK，%.1f MiB，%.0f kbps" % (len(got) / 1048576.0, speed),
         elapsed_ms=resp.elapsed_ms, severity=Severity.P1,
         suppress_key=manifest_key(mirror),
         extra={"kbps": speed, "bytes": len(got)})]
+    out.append(range_ok)
 
     # 速率判据的阈值**来自线上配置**（min_speed_kbps）。线上没给就不判——
     # 在这里写一个默认值，就是在插件里留第二份判据（铁律 2）。
     if min_speed_kbps is None:
-        out.append(ProbeResult(
+        out.append(_mirror_result(mirror,
             ok=True, probe=PROBE_SPEED, target=mirror.name,
             detail="线上配置未给 min_speed_kbps，本轮不判速率", unknown=True,
             suppress_key=manifest_key(mirror)))
     else:
         slow = speed < min_speed_kbps
-        out.append(ProbeResult(
+        out.append(_mirror_result(mirror,
             ok=not slow, probe=PROBE_SPEED, target=mirror.name,
             detail="%.0f kbps（线上阈值 %.0f kbps）%s"
                    % (speed, min_speed_kbps,
@@ -352,29 +381,31 @@ async def probe_version_json(client: HttpClient, mirror: Mirror, name: str
     try:
         resp = await client.fetch(url, headers=discovery.NO_CACHE)
     except HttpError as e:
-        return ProbeResult(ok=False, probe=PROBE_VERSION, target="%s#%s" % (mirror.name, name),
+        return _mirror_result(mirror, ok=False, probe=PROBE_VERSION, target="%s#%s" % (mirror.name, name),
                            detail="连接失败：%s" % e, elapsed_ms=elapsed_ms(t0),
                            severity=Severity.P1, suppress_key=manifest_key(mirror)), None
     if resp.status != 200:
-        return ProbeResult(ok=False, probe=PROBE_VERSION, target="%s#%s" % (mirror.name, name),
+        return _mirror_result(mirror, ok=False, probe=PROBE_VERSION, target="%s#%s" % (mirror.name, name),
                            detail="HTTP %d（期望 200）" % resp.status,
                            elapsed_ms=resp.elapsed_ms, severity=Severity.P1,
                            suppress_key=manifest_key(mirror)), None
     try:
+        if resp.truncated:
+            raise discovery.ContentError("版本响应超过本地读取上限，内容不完整")
         meta = discovery.parse_version_meta(resp.body)
     except discovery.DiscoveryError as e:
-        return ProbeResult(ok=False, probe=PROBE_VERSION, target="%s#%s" % (mirror.name, name),
+        return _mirror_result(mirror, ok=False, probe=PROBE_VERSION, target="%s#%s" % (mirror.name, name),
                            detail=str(e), elapsed_ms=resp.elapsed_ms,
                            severity=Severity.P1, suppress_key=manifest_key(mirror)), None
 
     if not meta.is_valid():
-        return ProbeResult(
+        return _mirror_result(mirror,
             ok=False, probe=PROBE_VERSION, target="%s#%s" % (mirror.name, name),
             detail="缺 version/size/md5（version=%s size=%s md5=%s）——客户端会因此"
                    "拒绝更新，热更静默停摆" % (meta.version, meta.size, meta.md5 or "空"),
             elapsed_ms=resp.elapsed_ms, severity=Severity.P1,
             suppress_key=manifest_key(mirror)), meta
-    return ProbeResult(
+    return _mirror_result(mirror,
         ok=True, probe=PROBE_VERSION, target="%s#%s" % (mirror.name, name),
         detail="OK，v%d，%.1f MiB" % (meta.version, meta.size / 1048576.0),
         elapsed_ms=resp.elapsed_ms, severity=Severity.P1,
@@ -398,36 +429,36 @@ async def probe_hot_package(client: HttpClient, mirror: Mirror, package: str,
         # 身份不符，而继续下只是替一条坏线路烧我们自己的带宽。
         res: DigestResult = await client.digest(url, max_bytes=meta.size + (1 << 20))
     except HttpError as e:
-        return ProbeResult(ok=False, probe=PROBE_HOTPKG, target=target,
+        return _mirror_result(mirror, ok=False, probe=PROBE_HOTPKG, target=target,
                            detail="连接失败：%s" % e, elapsed_ms=elapsed_ms(t0),
                            severity=Severity.P1, suppress_key=manifest_key(mirror))
     if res.status != 200:
-        return ProbeResult(ok=False, probe=PROBE_HOTPKG, target=target,
+        return _mirror_result(mirror, ok=False, probe=PROBE_HOTPKG, target=target,
                            detail="HTTP %d（期望 200）" % res.status,
                            elapsed_ms=res.elapsed_ms, severity=Severity.P1,
                            suppress_key=manifest_key(mirror))
     if res.overflow:
-        return ProbeResult(
+        return _mirror_result(mirror,
             ok=False, probe=PROBE_HOTPKG, target=target,
             detail="包比版本文件声称的大：说好 %d 字节，下到 %d 还没完，已中断"
                    % (meta.size, res.size),
             elapsed_ms=res.elapsed_ms, severity=Severity.P1,
             suppress_key=manifest_key(mirror))
     if res.size != meta.size:
-        return ProbeResult(
+        return _mirror_result(mirror,
             ok=False, probe=PROBE_HOTPKG, target=target,
             detail="长度不符：版本 json 说 %d，实得 %d" % (meta.size, res.size),
             elapsed_ms=res.elapsed_ms, severity=Severity.P1,
             suppress_key=manifest_key(mirror))
     if res.md5 != meta.md5:
-        return ProbeResult(
+        return _mirror_result(mirror,
             ok=False, probe=PROBE_HOTPKG, target=target,
             detail="整包 MD5 不符：期望 %s… 实得 %s…（长度对得上而内容不对，"
                    "多半是这条线路缓存了同名旧包）" % (meta.md5[:12], res.md5[:12]),
             elapsed_ms=res.elapsed_ms, severity=Severity.P1,
             suppress_key=manifest_key(mirror))
     speed = kbps(res.size, res.elapsed_ms)
-    return ProbeResult(
+    return _mirror_result(mirror,
         ok=True, probe=PROBE_HOTPKG, target=target,
         detail="OK，v%d，%.1f MiB，%.0f kbps"
                % (meta.version, res.size / 1048576.0, speed),
@@ -459,26 +490,24 @@ def check_manifest_consistency(per_mirror: Dict[str, Dict[str, FileEntry]]
         fingerprints: Dict[str, List[str]] = {}
         for mirror_name, entries in per_mirror.items():
             e = entries.get(name)
-            fp = "缺失" if e is None else "%d/%d/%s" % (
-                e.size, e.chunk_size, e.chunks[0][:8] if e.chunks else "")
+            fp = "缺失" if e is None else entry_fingerprint(e)
             fingerprints.setdefault(fp, []).append(mirror_name)
-        if len(fingerprints) == 1:
-            continue
-
         ranked = sorted(fingerprints.items(), key=lambda kv: -len(kv[1]))
-        top, rest = ranked[0], ranked[1:]
-        ambiguous = len(top[1]) == len(rest[0][1])
-        for fp, mirrors in rest:
+        top = ranked[0]
+        ambiguous = len(top[1]) * 2 <= len(per_mirror)
+        for fp, mirrors in ranked:
             for mirror_name in mirrors:
-                detail = ("与多数线路不一致（%d 条线路是 %s，这条是 %s）"
+                matches = fp == top[0]
+                detail = ("与多数线路一致" if matches else
+                          "与多数线路不一致（%d 条线路是 %s，这条是 %s）"
                           % (len(top[1]), _fp_human(top[0]), _fp_human(fp)))
                 out.append(ProbeResult(
-                    ok=False, probe=PROBE_CONSISTENCY,
+                    ok=matches and not ambiguous, probe=PROBE_CONSISTENCY,
                     target="%s#%s" % (mirror_name, name),
-                    detail=("各线路清单互不相同，说不清谁是对的：" + detail)
+                    detail="各线路清单没有明确多数，无法确认内容基准"
                            if ambiguous else detail,
                     severity=Severity.P1, unknown=ambiguous,
-                    suppress_key=KEY_ENTRY))
+                    suppress_key=KEY_ENTRY, extra={"mirror": mirror_name}))
     return out
 
 
@@ -518,32 +547,59 @@ async def probe_tls_expiry(host: str, port: int = 443, *,
                            fetch_not_after=None) -> ProbeResult:
     """证书剩余天数。`fetch_not_after` 可注入，测试用它避免联网。"""
     now = now if now is not None else time.time()
+    target = host if port == 443 else "%s:%d" % (
+        "[%s]" % host if ":" in host else host, port)
     getter = fetch_not_after or _default_not_after
     try:
         not_after = await getter(host, port)
     except Exception as e:                                    # noqa: BLE001
-        return ProbeResult(ok=True, probe=PROBE_TLS, target=host,
+        return ProbeResult(ok=True, probe=PROBE_TLS, target=target,
                            detail="取证书失败（%s），本轮跳过" % e, unknown=True)
     if not not_after:
-        return check_cert_days(host, None)
-    return check_cert_days(host, (not_after - now) / 86400.0)
+        return check_cert_days(target, None)
+    return check_cert_days(target, (not_after - now) / 86400.0)
 
 
 async def _default_not_after(host: str, port: int) -> Optional[float]:
     """真实现：握手拿证书。放在线程里跑——ssl 那套是阻塞 API。"""
     import asyncio
+    return await asyncio.wait_for(
+        asyncio.get_running_loop().run_in_executor(None, _tls_not_after, host, port),
+        timeout=15.0)
+
+
+def _tls_not_after(host: str, port: int) -> Optional[float]:
     import socket
     import ssl
 
-    def _handshake():
-        ctx = ssl.create_default_context()
-        with socket.create_connection((host, port), timeout=15) as sock:
-            with ctx.wrap_socket(sock, server_hostname=host) as tls:
-                cert = tls.getpeercert()
-        raw = cert.get("notAfter") if cert else None
-        # cert_time_to_seconds 认的就是 notAfter 那个格式，别自己 strptime——
-        # 它带时区缩写，手写解析在非英文 locale 上会挂。
-        return float(ssl.cert_time_to_seconds(raw)) if raw else None
+    deadline = time.monotonic() + 15.0
 
-    return await asyncio.get_running_loop().run_in_executor(None, _handshake)
+    def remaining():
+        seconds = deadline - time.monotonic()
+        if seconds <= 0:
+            raise TimeoutError("TLS 解析和握手超过总时限")
+        return seconds
 
+    ctx = ssl.create_default_context()
+    # TLS 探针也必须使用同一批经过校验的 DNS 结果，不能另走未防护的连接。
+    addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    for _, _, _, _, address in addresses:
+        require_public_address(address[0])
+    last_error = None
+    cert = None
+    for family, kind, protocol, _, address in addresses:
+        try:
+            with socket.socket(family, kind, protocol) as sock:
+                sock.settimeout(remaining())
+                sock.connect(address)
+                sock.settimeout(remaining())
+                with ctx.wrap_socket(sock, server_hostname=host) as tls:
+                    cert = tls.getpeercert()
+            break
+        except OSError as exc:
+            last_error = exc
+    if cert is None and last_error is not None:
+        raise last_error
+    raw = cert.get("notAfter") if cert else None
+    # cert_time_to_seconds 认的就是 notAfter 那个格式，避免手工解析时区缩写。
+    return float(ssl.cert_time_to_seconds(raw)) if raw else None

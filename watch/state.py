@@ -24,6 +24,7 @@ bot 一重启，内存里的状态全没了，所有仍在持续的故障都会�
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional, Sequence
@@ -33,6 +34,8 @@ from .models import ProbeResult, Severity
 
 GREEN = "GREEN"
 FIRING = "FIRING"
+SEVERITY_ORDER = {Severity.P0.value: 0, Severity.P1.value: 1,
+                  Severity.P2.value: 2, Severity.INFO.value: 3}
 
 
 @dataclass
@@ -47,6 +50,11 @@ class Entry:
     successes: int = 0
     last_detail: str = ""
     severity: str = Severity.P1.value
+    has_notified: bool = False
+    notified_severity: Optional[str] = None
+    result: Optional[dict] = None
+    pending_recovery_since: Optional[float] = None
+    pending_recovery_duration: float = 0.0
 
 
 @dataclass
@@ -76,7 +84,8 @@ class AlertState:
     # ── 静音 ────────────────────────────────────────────────
     def mute(self, seconds: float, now: Optional[float] = None) -> float:
         now = now if now is not None else time.time()
-        self.muted_until = now + max(0.0, seconds)
+        until = now + _number(seconds)
+        self.muted_until = until if math.isfinite(until) else now
         return self.muted_until
 
     def unmute(self) -> None:
@@ -92,7 +101,8 @@ class AlertState:
         """吃掉一轮结果，返回**这一轮该发出去的通知**（可能是空的）。
 
         静音期间照常推进状态机、但不产生通知：维护窗口结束后，还在坏的东西会在
-        下一轮正常报出来，而**期间恢复的不会补发一堆过期消息**。
+        下一轮正常报出来。窗口内发生又恢复的新故障不补发；此前已经报过的
+        故障则保留恢复通知，免得维护结束后群里仍只有那条失败消息。
         """
         now = now if now is not None else time.time()
         # 这个集合要**边吃边更新**：入口和下游线路的失败通常出现在同一轮里，
@@ -102,7 +112,17 @@ class AlertState:
         firing_keys = {k for k, e in self.entries.items() if e.status == FIRING}
         out: List[Notification] = []
 
+        # 多块抽样可能产生同一线路的多个 Range/速率结果；一轮只能记一票，
+        # 否则一轮里的两个坏块就能越过「连续多轮」门槛，后续好块又会假恢复。
+        round_results: Dict[str, ProbeResult] = {}
         for r in results:
+            previous = round_results.get(r.key)
+            if (previous is None or previous.unknown
+                    or (r.counts_as_failure() and not previous.counts_as_failure())
+                    or (r.counts_as_failure() and previous.counts_as_failure()
+                        and SEVERITY_ORDER[r.severity.value] < SEVERITY_ORDER[previous.severity.value])):
+                round_results[r.key] = r
+        for r in round_results.values():
             if r.unknown:
                 # 判据没跑成：既不算坏，也不算好——它不该把 FIRING 的东西
                 # 「治好」，也不该把 GREEN 的东西推向告警。
@@ -110,6 +130,8 @@ class AlertState:
             entry = self.entries.setdefault(r.key, Entry(key=r.key))
             entry.last_detail = r.detail
             entry.severity = r.severity.value
+            if r.counts_as_failure() or entry.status != FIRING:
+                entry.result = asdict(r)
             note = self._advance(entry, r, now, firing_keys)
             if entry.status == FIRING:
                 firing_keys.add(entry.key)
@@ -118,13 +140,30 @@ class AlertState:
             if note:
                 out.append(note)
 
+        if not self.is_muted(now):
+            out.extend(self._drain_recoveries())
+
         # 干净的条目不留：块校验的键是 (线路, 文件, 块号)，一条线路几百块，
         # 不清理的话状态表会随时间涨到几千条，还每轮全量写盘一次。
         # 判据是「这条还有没有信息量」——见 _evict_clean。
         self._evict_clean()
 
-        if self.is_muted(now):
-            return []
+        return out
+
+    def _drain_recoveries(self) -> List[Notification]:
+        """已经确认的恢复不必等慢探针再次到期；本轮复发会先撤销待发恢复。"""
+        out = []
+        for entry in self.entries.values():
+            if entry.status != GREEN or entry.pending_recovery_since is None:
+                continue
+            result = _result_from_dict(entry.result)
+            if result is None or not result.ok or result.unknown:
+                continue
+            out.append(Notification("recover", Severity.INFO, result,
+                                    entry.pending_recovery_since,
+                                    entry.pending_recovery_duration))
+            entry.pending_recovery_since = None
+            entry.pending_recovery_duration = 0.0
         return out
 
     def _evict_clean(self) -> int:
@@ -137,7 +176,8 @@ class AlertState:
         """
         gone = [k for k, e in self.entries.items()
                 if e.status == GREEN and not any(e.window)
-                and e.successes >= self.recover_after]
+                and e.successes >= self.recover_after
+                and e.pending_recovery_since is None]
         for k in gone:
             del self.entries[k]
         return len(gone)
@@ -145,41 +185,57 @@ class AlertState:
     def _advance(self, entry: Entry, r: ProbeResult, now: float,
                  firing_keys: set) -> Optional[Notification]:
         failed = r.counts_as_failure()
+        first_failure = not any(entry.window) and entry.status != FIRING
         entry.window.append(failed)
         if len(entry.window) > self.window:
             entry.window = entry.window[-self.window:]
 
         if failed:
             entry.successes = 0
-            if not entry.first_failed_at:
+            entry.pending_recovery_since = None
+            entry.pending_recovery_duration = 0.0
+            if first_failure:
                 entry.first_failed_at = now
-            if entry.status == FIRING:
-                if now - entry.last_notified_at >= self.remind_every:
-                    entry.last_notified_at = now
-                    return Notification("remind", r.severity, r,
-                                        entry.first_failed_at,
-                                        now - entry.first_failed_at)
-                return None
-            if sum(entry.window) >= self.fire_after:
-                # 抑制链：我依赖的那个已经在报了，我这条是必然结果，不单独报。
-                # 状态照样进 FIRING——否则上游恢复后，我这条会被当成新故障。
+            if entry.status != FIRING and sum(entry.window) >= self.fire_after:
                 entry.status = FIRING
-                entry.last_notified_at = now
-                if r.suppress_key and r.suppress_key in firing_keys:
-                    return None
-                return Notification("fire", r.severity, r, entry.first_failed_at,
-                                    now - entry.first_failed_at)
-            return None
+            if entry.status != FIRING:
+                return None
+            # 静音与抑制只影响交付，不消耗首次通知或提醒的时间。
+            if self.is_muted(now) or (r.suppress_key and r.suppress_key in firing_keys):
+                return None
+            # 判据最新级别和已经通知过的级别分开记：静音期间的升级不能被
+            # 后续覆盖掉，也不能让紧急升级等待完整的周期提醒间隔。
+            escalated = (entry.has_notified and entry.notified_severity is not None
+                         and SEVERITY_ORDER[r.severity.value]
+                         < SEVERITY_ORDER[entry.notified_severity])
+            if (entry.has_notified and not escalated
+                    and now - entry.last_notified_at < self.remind_every):
+                return None
+            kind = "remind" if entry.has_notified and not escalated else "fire"
+            entry.has_notified = True
+            entry.notified_severity = r.severity.value
+            entry.last_notified_at = now
+            return Notification(kind, r.severity, r, entry.first_failed_at,
+                                now - entry.first_failed_at)
 
         entry.successes += 1
         if entry.status == FIRING and entry.successes >= self.recover_after:
             since = entry.first_failed_at
+            was_notified = entry.has_notified
             entry.status = GREEN
             entry.first_failed_at = 0.0
             entry.last_notified_at = 0.0
+            entry.has_notified = False
+            entry.notified_severity = None
             entry.window = []
+            entry.result = asdict(r)
+            if self.is_muted(now):
+                if was_notified:
+                    entry.pending_recovery_since = since
+                    entry.pending_recovery_duration = max(0.0, now - since)
+                return None
             return Notification("recover", Severity.INFO, r, since,
-                                now - since if since else 0.0)
+                                max(0.0, now - since))
         return None
 
     # ── 查询 ────────────────────────────────────────────────
@@ -190,6 +246,11 @@ class AlertState:
         e = self.entries.get(key)
         return bool(e and e.status == FIRING)
 
+    def active_results(self) -> List[ProbeResult]:
+        """取仍在故障中的最近结果，供跨轮次的线路影响聚合使用。"""
+        return [r for e in self.firing()
+                if (r := _result_from_dict(e.result)) is not None]
+
     def note(self, name: str) -> Optional[str]:
         return self.notes.get(name)
 
@@ -199,7 +260,7 @@ class AlertState:
     # ── 落盘 ────────────────────────────────────────────────
     def to_dict(self) -> dict:
         return {
-            "version": 1,
+            "version": 2,
             "muted_until": self.muted_until,
             "notes": self.notes,
             "entries": {k: asdict(e) for k, e in self.entries.items()},
@@ -208,24 +269,43 @@ class AlertState:
     def load_dict(self, data: dict) -> None:
         if not isinstance(data, dict):
             return
-        self.muted_until = float(data.get("muted_until") or 0.0)
+        self.muted_until = _number(data.get("muted_until"))
         notes = data.get("notes")
         self.notes = {str(k): str(v) for k, v in notes.items()} if isinstance(notes, dict) else {}
+        self.entries = {}
         entries = data.get("entries")
         if not isinstance(entries, dict):
             return
         for key, raw in entries.items():
             if not isinstance(raw, dict):
                 continue
-            self.entries[key] = Entry(
+            window = raw.get("window")
+            window = [x for x in window if isinstance(x, bool)] if isinstance(window, list) else []
+            status = FIRING if raw.get("status") == FIRING else GREEN
+            notified = raw.get("has_notified")
+            # 旧格式只在实际生成通知时记时间；未知旧状态保守保留去重行为。
+            if not isinstance(notified, bool):
+                notified = status == FIRING
+            severity = raw.get("severity")
+            severity = severity if isinstance(severity, str) and severity in SEVERITY_ORDER else Severity.P1.value
+            notified_severity = raw.get("notified_severity")
+            if not isinstance(notified_severity, str) or notified_severity not in SEVERITY_ORDER:
+                notified_severity = severity if notified else None
+            result = _result_from_dict(raw.get("result"))
+            self.entries[str(key)] = Entry(
                 key=str(key),
-                status=str(raw.get("status") or GREEN),
-                window=[bool(x) for x in (raw.get("window") or [])][-self.window:],
-                first_failed_at=float(raw.get("first_failed_at") or 0.0),
-                last_notified_at=float(raw.get("last_notified_at") or 0.0),
-                successes=int(raw.get("successes") or 0),
+                status=status,
+                window=window[-self.window:],
+                first_failed_at=_number(raw.get("first_failed_at")),
+                last_notified_at=_number(raw.get("last_notified_at")),
+                successes=int(_number(raw.get("successes"))),
                 last_detail=str(raw.get("last_detail") or ""),
-                severity=str(raw.get("severity") or Severity.P1.value),
+                severity=severity,
+                has_notified=notified,
+                notified_severity=notified_severity,
+                result=asdict(result) if result is not None and result.key == str(key) else None,
+                pending_recovery_since=_optional_number(raw.get("pending_recovery_since")),
+                pending_recovery_duration=_number(raw.get("pending_recovery_duration")),
             )
 
     def save(self, path: str) -> None:
@@ -233,3 +313,36 @@ class AlertState:
 
     def load(self, path: str) -> None:
         self.load_dict(store.load_json(path) or {})
+
+
+def _number(value, default: float = 0.0) -> float:
+    """落盘状态可丢弃：坏字段不该阻止整个插件启动。"""
+    if isinstance(value, bool):
+        return default
+    try:
+        number = float(value)
+        return number if math.isfinite(number) and number >= 0 else default
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _optional_number(value) -> Optional[float]:
+    number = _number(value, default=-1.0)
+    return number if number >= 0 else None
+
+
+def _result_from_dict(raw) -> Optional[ProbeResult]:
+    if not isinstance(raw, dict) or not isinstance(raw.get("ok"), bool):
+        return None
+    if not all(isinstance(raw.get(k), str) for k in ("probe", "target", "detail")):
+        return None
+    try:
+        severity = Severity(raw.get("severity", Severity.P1.value))
+    except (TypeError, ValueError):
+        return None
+    return ProbeResult(raw["ok"], raw["probe"], raw["target"], raw["detail"],
+                       elapsed_ms=int(_number(raw.get("elapsed_ms"))),
+                       severity=severity,
+                       suppress_key=raw.get("suppress_key") if isinstance(raw.get("suppress_key"), str) else None,
+                       unknown=raw.get("unknown") is True,
+                       extra=raw.get("extra") if isinstance(raw.get("extra"), dict) else {})

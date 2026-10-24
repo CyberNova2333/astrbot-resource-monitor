@@ -80,9 +80,9 @@ class MuteTest(unittest.TestCase):
         s.mute(1800, now=0)
         self.assertEqual(kinds(s.ingest([BAD], now=10)), [])
         self.assertTrue(s.is_firing(BAD.key))
-        # 静音结束后仍然坏着的，会在下一轮按「还在坏」提醒
+        # 静音期间从未交付的故障，解除静音后的下一轮应发首次通知。
         s.unmute()
-        self.assertEqual(kinds(s.ingest([BAD], now=10 + 7 * 3600)), ["remind"])
+        self.assertEqual(kinds(s.ingest([BAD], now=11)), ["fire"])
 
 
 class PersistenceTest(unittest.TestCase):

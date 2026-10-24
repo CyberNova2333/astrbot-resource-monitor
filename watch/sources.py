@@ -32,6 +32,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -68,7 +69,11 @@ class Discovered:
         v = self.settings.get(name)
         if isinstance(v, bool) or not isinstance(v, (int, float)):
             return None
-        return float(v)
+        try:
+            number = float(v)
+        except (ValueError, OverflowError):
+            return None
+        return number if math.isfinite(number) and number >= 0 else None
 
     def snapshot(self) -> dict:
         """归一化快照：落盘、以及「这次改动是不是把自己打死了」的比对基准。
@@ -92,26 +97,25 @@ class Discovered:
     def from_snapshot(cls, data: Optional[dict]) -> Optional["Discovered"]:
         if not isinstance(data, dict):
             return None
-        mirrors = []
-        for m in data.get("mirrors") or []:
-            if not isinstance(m, dict) or not m.get("base"):
-                continue
-            mirrors.append(Mirror(name=str(m.get("name") or m["base"]),
-                                  base=str(m["base"]),
-                                  weight=int(m.get("weight") or 0),
-                                  chunks=int(m.get("chunks") or 0),
-                                  enabled=bool(m.get("enabled", True))))
+        try:
+            mirrors, _ = discovery.parse_mirrors(data.get("mirrors"))
+        except discovery.ContentError:
+            return None
         settings = data.get("settings")
         packages = data.get("packages")
+        names = data.get("version_files")
         return cls(
             mirrors=mirrors,
             settings={str(k): v for k, v in settings.items()}
             if isinstance(settings, dict) else {},
-            version_files=[str(x) for x in (data.get("version_files") or [])],
-            packages={str(k): str(v) for k, v in packages.items()}
+            version_files=[x for x in names if isinstance(x, str)]
+            if isinstance(names, list) else [],
+            packages={str(k): v for k, v in packages.items() if isinstance(v, str)}
             if isinstance(packages, dict) else {},
-            client_version=data.get("client_version"),
-            proxy_base=data.get("proxy_base"),
+            client_version=data.get("client_version")
+            if isinstance(data.get("client_version"), str) else None,
+            proxy_base=data.get("proxy_base")
+            if isinstance(data.get("proxy_base"), str) else None,
             source_name=str(data.get("source") or ""),
         )
 
@@ -197,6 +201,14 @@ class EndpointSource(Source):
                 extra={"reason": "content" if content else "unreachable"}), None
 
         disc = self.to_discovered(cfg)
+        if cfg.invalid_mirrors:
+            return ProbeResult(
+                ok=False, probe=PROBE_SOURCE, target="配置源",
+                detail="内容坏了：%d 条线路记录无效；其余 %d 条继续探测（%s）"
+                       % (len(cfg.invalid_mirrors), len(disc.mirrors),
+                          "；".join(cfg.invalid_mirrors[:3])),
+                elapsed_ms=resp.elapsed_ms, severity=Severity.P0,
+                extra={"reason": "content", "skipped": len(cfg.invalid_mirrors)}), disc
         return ProbeResult(
             ok=True, probe=PROBE_SOURCE, target="配置源",
             detail="OK，%d 条线路（%d 条启用）%s"
@@ -263,28 +275,30 @@ class MirrorListSource(Source):
 
 def build(spec: dict) -> Source:
     """按配置造一个源。形状不认识就抛——**不猜**。"""
+    if not isinstance(spec, dict):
+        raise ValueError("配置源必须是对象")
     kind = str((spec or {}).get("type") or "").strip().lower()
     if kind in ("endpoint", "url", "config", "legacy-config"):
         urls = spec.get("urls") or []
         if isinstance(urls, str):
             urls = [urls]
-        return EndpointSource([str(u).strip() for u in urls if str(u).strip()])
+        if not isinstance(urls, list):
+            raise ValueError("配置源 urls 必须是数组")
+        return EndpointSource([u.strip() for u in urls if isinstance(u, str) and u.strip()])
     if kind in ("mirrors", "static", "local"):
-        mirrors = []
-        for item in spec.get("mirrors") or []:
-            if not isinstance(item, dict) or not item.get("base"):
-                continue
-            mirrors.append(Mirror(
-                name=str(item.get("name") or item["base"]),
-                base=str(item["base"]),
-                weight=int(item.get("weight") or 0),
-                chunks=int(item.get("chunks") or 0),
-                enabled=bool(item.get("enabled", True))))
+        try:
+            mirrors, skipped = discovery.parse_mirrors(spec.get("mirrors"))
+        except discovery.ContentError as exc:
+            raise ValueError(str(exc)) from exc
+        if skipped:
+            raise ValueError("本地线路配置无效：%s" % "；".join(skipped[:3]))
         packages = spec.get("packages")
+        names = spec.get("version_files")
         return MirrorListSource(
             mirrors,
-            version_files=[str(x) for x in (spec.get("version_files") or [])],
-            packages={str(k): str(v) for k, v in packages.items()}
+            version_files=[x for x in names if isinstance(x, str)]
+            if isinstance(names, list) else [],
+            packages={str(k): v for k, v in packages.items() if isinstance(v, str)}
             if isinstance(packages, dict) else {})
     raise ValueError("不认识的配置源类型：%r（可用：endpoint / mirrors）" % kind)
 

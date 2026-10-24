@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -79,6 +81,7 @@ class Mirror:
 
 
 HEX32 = re.compile(r"^[0-9a-f]{32}$")
+MAX_METADATA_INTEGER = (1 << 63) - 1
 
 
 @dataclass(frozen=True)
@@ -109,9 +112,26 @@ class FileEntry:
         return start, end
 
     def is_valid(self) -> bool:
-        if self.size <= 0 or self.chunk_size <= 0 or not self.chunks:
+        if (isinstance(self.size, bool) or not isinstance(self.size, int)
+                or isinstance(self.chunk_size, bool) or not isinstance(self.chunk_size, int)
+                or not 0 < self.size <= MAX_METADATA_INTEGER
+                or not 0 < self.chunk_size <= MAX_METADATA_INTEGER or not self.chunks):
             return False
-        return all(bool(HEX32.match(h)) for h in self.chunks)
+        if self.count != (self.size + self.chunk_size - 1) // self.chunk_size:
+            return False
+        return all(isinstance(h, str) and bool(HEX32.fullmatch(h)) for h in self.chunks)
+
+
+def entry_fingerprint(entry: FileEntry) -> str:
+    """比较完整内容身份；不能只取首块或哈希前缀，否则同长度更新会被漏掉。"""
+    digest = hashlib.sha256("\n".join(entry.chunks).encode("ascii")).hexdigest()
+    return "%d/%d/%s" % (entry.size, entry.chunk_size, digest)
+
+
+def manifest_fingerprint(entries: Dict[str, FileEntry]) -> str:
+    """多数基准与逐文件一致性共用同一份内容指纹。"""
+    canonical = [(name, entry_fingerprint(entry)) for name, entry in sorted(entries.items())]
+    return hashlib.sha256(json.dumps(canonical, ensure_ascii=True).encode("ascii")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -126,8 +146,11 @@ class VersionMeta:
     md5: str
 
     def is_valid(self) -> bool:
-        return (self.version > 0 and self.size > 0
-                and bool(HEX32.match((self.md5 or "").lower())))
+        return (type(self.version) is int and type(self.size) is int
+                and 0 < self.version <= MAX_METADATA_INTEGER
+                and 0 < self.size <= MAX_METADATA_INTEGER
+                and isinstance(self.md5, str)
+                and bool(HEX32.fullmatch(self.md5.lower())))
 
 
 @dataclass
@@ -140,6 +163,7 @@ class OnlineConfig:
 
     raw: dict
     mirrors: List[Mirror]
+    invalid_mirrors: List[str] = field(default_factory=list)
 
     @property
     def schema(self) -> Optional[int]:

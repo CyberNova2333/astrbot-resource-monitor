@@ -8,7 +8,7 @@
 还没验过」这个答案——`/线路 覆盖率` 这条命令就没法回答，而那正是这套东西凭
 什么说「线上是好的」的依据。
 
-游标记的是 `(文件名, 块序号)` 而不是下标：清单会变（加文件、改块大小），记
+游标记的是 `(线路名, 文件名, 块序号)` 而不是下标：清单会变（加文件、改块大小），记
 下标的话清单一变，游标就指到别的东西上，覆盖统计跟着全乱。
 
 ## 大件的节奏另算
@@ -20,9 +20,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import math
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from .models import FileEntry
 
@@ -42,9 +45,11 @@ class CoverageReport:
 class Rotation:
     """块轮转游标 + 覆盖记录。"""
 
-    def __init__(self, cursor: str = "", seen: Optional[Dict[str, float]] = None):
+    def __init__(self, cursor: str = "", seen: Optional[Dict[str, float]] = None,
+                 signatures: Optional[Dict[str, str]] = None):
         self.cursor = cursor
         self.seen: Dict[str, float] = dict(seen or {})
+        self.signatures: Dict[str, str] = dict(signatures or {})
 
     @staticmethod
     def _pairs(entries: Dict[str, FileEntry]) -> List[Tuple[str, int]]:
@@ -55,8 +60,53 @@ class Rotation:
         return out
 
     @staticmethod
-    def token(name: str, index: int) -> str:
+    def token(name: str, index: int, *, mirror: Optional[str] = None) -> str:
+        if mirror is not None:
+            return json.dumps([mirror, name, index], ensure_ascii=False, separators=(",", ":"))
         return "%s#%d" % (name, index)
+
+    def plan_for_mirrors(self, entries: Dict[str, FileEntry],
+                         mirror_names: Sequence[str], count: int
+                         ) -> List[Tuple[str, FileEntry, int]]:
+        """对线路与分块的笛卡尔积轮转，避免两个独立游标永远锁在同一对。"""
+        self._sync_signatures(entries)
+        pairs = self._pairs(entries)
+        mirrors = list(dict.fromkeys(mirror_names))
+        if not pairs or not mirrors or count <= 0:
+            return []
+        start = 0
+        try:
+            mirror, name, index = json.loads(self.cursor)
+            start = pairs.index((name, index)) * len(mirrors) + mirrors.index(mirror) + 1
+        except (ValueError, TypeError, IndexError):
+            pass
+        total = len(pairs) * len(mirrors)
+        picks = []
+        for offset in range(min(count, total)):
+            position = (start + offset) % total
+            name, index = pairs[position // len(mirrors)]
+            picks.append((mirrors[position % len(mirrors)], entries[name], index))
+        return picks
+
+    def advance(self, name: str, index: int, *, mirror: Optional[str] = None) -> None:
+        """失败也推进游标，但不能把失败记成成功覆盖。"""
+        self.cursor = self.token(name, index, mirror=mirror)
+
+    def _sync_signatures(self, entries: Dict[str, FileEntry]) -> None:
+        current = {name: hashlib.sha256(json.dumps(
+            [e.size, e.chunk_size, list(e.chunks)], separators=(",", ":")
+        ).encode("utf-8")).hexdigest() for name, e in entries.items()}
+        changed = {name for name, signature in current.items()
+                   if self.signatures.get(name) != signature}
+        for token in list(self.seen):
+            try:
+                identity = json.loads(token)
+            except (ValueError, TypeError):
+                continue
+            if (isinstance(identity, list) and len(identity) == 3
+                    and isinstance(identity[1], str) and identity[1] in changed):
+                del self.seen[token]
+        self.signatures = current
 
     def plan(self, entries: Dict[str, FileEntry], count: int
              ) -> List[Tuple[FileEntry, int]]:
@@ -78,14 +128,16 @@ class Rotation:
             picked.append((entries[name], idx))
         return picked
 
-    def mark(self, name: str, index: int, now: Optional[float] = None) -> None:
+    def mark(self, name: str, index: int, now: Optional[float] = None,
+             *, mirror: Optional[str] = None) -> None:
         now = now if now is not None else time.time()
-        self.seen[self.token(name, index)] = now
-        self.cursor = self.token(name, index)
+        self.seen[self.token(name, index, mirror=mirror)] = now
+        self.advance(name, index, mirror=mirror)
 
     def coverage(self, entries: Dict[str, FileEntry],
                  window_seconds: float = 7 * 86400.0,
-                 now: Optional[float] = None) -> CoverageReport:
+                 now: Optional[float] = None, *,
+                 mirror_names: Optional[Sequence[str]] = None) -> CoverageReport:
         """覆盖率：**窗口内**验过的块占比。
 
         带窗口是有意的：一个月前验过的块，说明不了这条线路现在是好的。
@@ -93,13 +145,17 @@ class Rotation:
         """
         now = now if now is not None else time.time()
         pairs = self._pairs(entries)
-        report = CoverageReport(total=len(pairs))
+        if mirror_names is not None:
+            self._sync_signatures(entries)
+        mirrors = list(dict.fromkeys(mirror_names)) if mirror_names is not None else [None]
+        tokens = [self.token(name, idx, mirror=mirror) for name, idx in pairs for mirror in mirrors]
+        report = CoverageReport(total=len(tokens))
         oldest = 0.0
-        for name, idx in pairs:
-            ts = self.seen.get(self.token(name, idx))
+        for token in tokens:
+            ts = self.seen.get(token)
             # `is not None`，不是 `if ts`：时间戳 0 是合法值（epoch），
             # 按真值判会把它当成「没验过」。
-            if ts is not None and now - ts <= window_seconds:
+            if ts is not None and 0 <= now - ts <= window_seconds:
                 report.verified += 1
                 oldest = max(oldest, now - ts)
             elif ts is not None:
@@ -107,25 +163,32 @@ class Rotation:
         report.oldest_age_seconds = oldest
         return report
 
-    def prune(self, entries: Dict[str, FileEntry]) -> int:
+    def prune(self, entries: Dict[str, FileEntry], *,
+              mirror_names: Optional[Sequence[str]] = None) -> int:
         """清掉清单里已经不存在的块记录。返回清掉几条。"""
-        valid = {self.token(n, i) for n, i in self._pairs(entries)}
+        before = len(self.seen)
+        if mirror_names is not None:
+            self._sync_signatures(entries)
+        mirrors = list(dict.fromkeys(mirror_names)) if mirror_names is not None else [None]
+        valid = {self.token(n, i, mirror=m) for n, i in self._pairs(entries) for m in mirrors}
         gone = [k for k in self.seen if k not in valid]
         for k in gone:
             del self.seen[k]
-        return len(gone)
+        return before - len(self.seen)
 
     def to_dict(self) -> dict:
-        return {"cursor": self.cursor, "seen": self.seen}
+        return {"cursor": self.cursor, "seen": self.seen, "signatures": self.signatures}
 
     @classmethod
     def from_dict(cls, data: Optional[dict]) -> "Rotation":
         if not isinstance(data, dict):
             return cls()
-        seen = data.get("seen")
+        signatures = data.get("signatures")
         return cls(cursor=str(data.get("cursor") or ""),
-                   seen={str(k): float(v) for k, v in seen.items()}
-                   if isinstance(seen, dict) else {})
+                   seen=_timestamps(data.get("seen")),
+                   signatures={k: v for k, v in signatures.items()
+                               if isinstance(k, str) and isinstance(v, str)}
+                   if isinstance(signatures, dict) else {})
 
 
 class Ticker:
@@ -137,7 +200,7 @@ class Ticker:
     def due(self, name: str, interval_seconds: float,
             now: Optional[float] = None) -> bool:
         now = now if now is not None else time.time()
-        return now - self.last.get(name, 0.0) >= interval_seconds
+        return name not in self.last or now - self.last[name] >= interval_seconds
 
     def mark(self, name: str, now: Optional[float] = None) -> None:
         self.last[name] = now if now is not None else time.time()
@@ -149,7 +212,23 @@ class Ticker:
     def from_dict(cls, data: Optional[dict]) -> "Ticker":
         if not isinstance(data, dict):
             return cls()
-        return cls({str(k): float(v) for k, v in data.items()})
+        return cls(_timestamps(data))
+
+
+def _timestamps(data) -> Dict[str, float]:
+    if not isinstance(data, dict):
+        return {}
+    valid = {}
+    for key, value in data.items():
+        if isinstance(value, bool):
+            continue
+        try:
+            timestamp = float(value)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if math.isfinite(timestamp) and timestamp >= 0:
+            valid[str(key)] = timestamp
+    return valid
 
 
 @dataclass
