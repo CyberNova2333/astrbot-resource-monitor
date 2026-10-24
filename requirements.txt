@@ -3,4 +3,5 @@
 #
 # 判据层的测试**不需要任何第三方包**：探针只认 watch/http.py 里的协议，
 # 测试喂一个假实现。跑测试请用 python3 -m unittest discover -s tests。
-aiohttp>=3.8
+# 排除旧版 HTTP 响应解析与连接池缺陷；部署更新时也需升级已有环境。
+aiohttp>=3.14.5

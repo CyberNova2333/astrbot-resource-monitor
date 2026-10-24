@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Sequence, Set
@@ -55,7 +56,7 @@ class CommandGate:
         now = now if now is not None else time.time()
         p = self.policy
 
-        if not p.respond_anywhere and p.allow_sessions and session not in p.allow_sessions:
+        if not p.respond_anywhere and session not in p.allow_sessions:
             # 在别的群里干脆不回（返回空字符串 = 静默拒绝）：那些群没理由看到
             # 线路地址，而回一句「你没权限」本身也是在回应陌生环境里的指令。
             return ""
@@ -93,11 +94,21 @@ def build(sessions: Sequence[str], raw: Optional[dict] = None) -> CommandGate:
     if isinstance(extra, list):
         allow |= {str(s).strip() for s in extra if str(s).strip()}
     cooldown = raw.get("cooldown_seconds", 60)
+    try:
+        cooldown = float(cooldown) if isinstance(cooldown, (int, float)) and not isinstance(cooldown, bool) else 60.0
+    except (ValueError, OverflowError):
+        cooldown = 60.0
+    if not math.isfinite(cooldown) or cooldown < 0:
+        cooldown = 60.0
+
+    def flag(name, default):
+        value = raw.get(name)
+        return value if isinstance(value, bool) else default
+
     return CommandGate(CommandPolicy(
         allow_sessions=allow,
-        respond_anywhere=bool(raw.get("respond_anywhere", False)),
-        heavy_admin_only=bool(raw.get("heavy_admin_only", True)),
-        privileged_admin_only=bool(raw.get("privileged_admin_only", True)),
-        cooldown_seconds=float(cooldown) if isinstance(cooldown, (int, float))
-        and not isinstance(cooldown, bool) else 60.0,
+        respond_anywhere=flag("respond_anywhere", False),
+        heavy_admin_only=flag("heavy_admin_only", True),
+        privileged_admin_only=flag("privileged_admin_only", True),
+        cooldown_seconds=cooldown,
     ))

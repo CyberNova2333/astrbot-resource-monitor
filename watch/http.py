@@ -16,9 +16,19 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
+import re
+import socket
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Dict, Mapping, Optional
+from urllib.parse import urljoin, urlsplit
+
+# 监控自身的资源边界，不能由远端清单里的块大小抬高。
+MAX_BUFFER_BYTES = 64 * 1024 * 1024
+MAX_REDIRECTS = 5
+_NUMERIC_HOST = re.compile(r"(?:0x[0-9a-f]+|[0-9]+)(?:\.(?:0x[0-9a-f]+|[0-9]+)){0,3}", re.I)
 
 
 class HttpError(Exception):
@@ -27,6 +37,73 @@ class HttpError(Exception):
     消息要写成人能读的，它会直接进告警：`连接超时（15.0s）` 比
     `TimeoutError()` 有用得多。
     """
+
+
+def require_public_address(host: str) -> None:
+    """检查连接将实际使用的数值地址，不再另做一次存在竞态的预解析。"""
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError as exc:
+        raise HttpError("解析结果不是有效的数值地址") from exc
+    if isinstance(address, ipaddress.IPv6Address):
+        # 不依赖不同 Python 小版本对过渡地址段的分类，内嵌地址也必须可公开连接。
+        for embedded in (address.ipv4_mapped, address.sixtofour, *(address.teredo or ())):
+            if embedded is not None:
+                require_public_address(str(embedded))
+    if (not address.is_global or address.is_multicast or address.is_reserved
+            or getattr(address, "scope_id", None)):
+        raise HttpError("拒绝连接非公网地址")
+
+
+def validate_public_url(url: str) -> str:
+    """先挡住字面量内网地址；域名由连接器解析并校验实际地址。"""
+    if not isinstance(url, str):
+        raise HttpError("HTTP 地址必须是字符串")
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname
+        port = parsed.port
+    except (TypeError, ValueError) as exc:
+        raise HttpError("不是有效的 HTTP 地址") from exc
+    if (parsed.scheme not in ("http", "https") or not host
+            or parsed.username is not None or parsed.password is not None
+            or (port is not None and port <= 0)):
+        raise HttpError("仅允许不含凭证的 HTTP 地址")
+    try:
+        host = host.encode("idna").decode("ascii")
+    except UnicodeError as exc:
+        raise HttpError("主机名不能规范化") from exc
+    normalized = host.rstrip(".").lower()
+    if (normalized == "localhost" or normalized.endswith(".localhost")
+            or normalized == "localhost.localdomain" or "%" in host):
+        raise HttpError("拒绝连接本机地址")
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        if ":" in host or _NUMERIC_HOST.fullmatch(normalized):
+            # 某些连接器把整数、八进制和缩写当作 IP，直接连接而不经过 resolver。
+            raise HttpError("拒绝非规范的数值地址")
+    else:
+        require_public_address(host)
+    return host
+
+
+class PublicResolver:
+    """把经过检查的同一批地址交给连接器，避免检查后再次 DNS 查询。"""
+
+    def __init__(self, resolver):
+        self._resolver = resolver
+
+    async def resolve(self, host, port=0, family=socket.AF_INET):
+        addresses = await self._resolver.resolve(host, port, family=family)
+        if not addresses:
+            raise HttpError("DNS 没有返回可连接地址")
+        for item in addresses:
+            require_public_address(item["host"])
+        return addresses
+
+    async def close(self):
+        await self._resolver.close()
 
 
 def _lower(headers: Optional[Mapping[str, str]]) -> Dict[str, str]:
@@ -97,7 +174,7 @@ class AiohttpClient(HttpClient):
 
       · `Accept-Encoding: identity`：让服务器别压缩。压缩过的字节算出来的 MD5
         跟清单对不上是必然的，而那不是故障；
-      · 不自动跟随重定向到别的主机时也照样记录——重定向本身是要看见的事实；
+      · 每次重定向重新检查地址，DNS 结果直接用于连接，不允许转进内网；
       · User-Agent 由配置给，且**与客户端不同**：混在一起以后就没法按 UA 把
         监控流量从访问日志里摘出去。
     """
@@ -112,17 +189,21 @@ class AiohttpClient(HttpClient):
                 "缺少 aiohttp。它是 AstrBot 运行环境里本来就有的依赖；"
                 "独立跑本插件时 pip install aiohttp") from e
         self._aiohttp = __import__("aiohttp")
+        from yarl import URL
+        self._url_type = URL
         self._ua = user_agent
         self._timeout = timeout_seconds
         # 整包核对是几百 MB，用小响应那个超时必然拉不完——那会把「包很大」
         # 误报成「线路坏了」，而误报的监控没几天就没人看了。
         self._stream_timeout = max(timeout_seconds, stream_timeout_seconds)
-        self._max_body = max_body_bytes
+        self._max_body = min(MAX_BUFFER_BYTES, max(1, int(max_body_bytes)))
         self._session = None
+        self._resolver = None
 
     async def _ensure(self):
         if self._session is None or self._session.closed:
             aiohttp = self._aiohttp
+            self._resolver = PublicResolver(aiohttp.resolver.DefaultResolver())
             self._session = aiohttp.ClientSession(
                 # 会话级只设连接与首字节超时；整体时长按请求给（小响应 30s、
                 # 整包核对半小时），否则两者只能二选一。
@@ -132,6 +213,10 @@ class AiohttpClient(HttpClient):
                 headers={"User-Agent": self._ua,
                          "Accept-Encoding": "identity"},
                 auto_decompress=False,
+                connector=aiohttp.TCPConnector(resolver=self._resolver),
+                # 探针不需要服务端会话，禁用 Cookie 避免跨请求状态和额外解析面。
+                cookie_jar=aiohttp.DummyCookieJar(),
+                trust_env=False,
             )
         return self._session
 
@@ -139,20 +224,46 @@ class AiohttpClient(HttpClient):
         if self._session is not None and not self._session.closed:
             await self._session.close()
         self._session = None
+        if self._resolver is not None:
+            await self._resolver.close()
+            self._resolver = None
+
+    @asynccontextmanager
+    async def _get(self, url, *, headers, timeout):
+        session = await self._ensure()
+        deadline = time.monotonic() + timeout
+        for hop in range(MAX_REDIRECTS + 1):
+            validate_public_url(url)
+            # 校验真正传给连接器的规范化地址；Unicode 域名可能归一成数值 IP。
+            url = self._url_type(url)
+            validate_public_url(str(url))
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise HttpError("请求及重定向超过总时限")
+            async with session.get(
+                    url, headers=dict(headers or {}), allow_redirects=False,
+                    timeout=self._aiohttp.ClientTimeout(
+                        total=remaining, connect=self._timeout,
+                        sock_read=self._timeout)) as resp:
+                if resp.status in (301, 302, 303, 307, 308) and resp.headers.get("Location"):
+                    if hop == MAX_REDIRECTS:
+                        raise HttpError("重定向次数超过本地上限")
+                    url = urljoin(str(resp.url), resp.headers["Location"])
+                    continue
+                yield resp
+                return
 
     async def fetch(self, url, *, headers=None, max_bytes=None) -> HttpResponse:
-        session = await self._ensure()
-        cap = max_bytes or self._max_body
+        cap = min(MAX_BUFFER_BYTES, max(1, int(max_bytes))) if max_bytes is not None else self._max_body
         t0 = time.monotonic()
         try:
-            async with session.get(
-                    url, headers=dict(headers or {}),
-                    timeout=self._aiohttp.ClientTimeout(total=self._timeout)) as resp:
+            async with self._get(url, headers=headers, timeout=self._timeout) as resp:
                 buf = bytearray()
                 truncated = False
                 async for chunk in resp.content.iter_chunked(64 * 1024):
-                    buf.extend(chunk)
-                    if len(buf) > cap:
+                    remaining = cap - len(buf)
+                    buf.extend(chunk[:remaining])
+                    if len(chunk) > remaining:
                         truncated = True
                         break
                 return HttpResponse(
@@ -170,15 +281,12 @@ class AiohttpClient(HttpClient):
         变成了那条线路的长期负载。上限由调用方按「版本文件声明的大小」给，
         超了直接判失败：本来就说明这个包不是它声称的那个。
         """
-        session = await self._ensure()
-        cap = max_bytes if max_bytes and max_bytes > 0 else None
+        if max_bytes is None or max_bytes <= 0:
+            raise HttpError("流式读取必须指定正数字节上限")
+        cap = max_bytes
         t0 = time.monotonic()
         try:
-            async with session.get(
-                    url, headers=dict(headers or {}),
-                    timeout=self._aiohttp.ClientTimeout(
-                        total=self._stream_timeout, connect=self._timeout,
-                        sock_read=self._timeout)) as resp:
+            async with self._get(url, headers=headers, timeout=self._stream_timeout) as resp:
                 md = hashlib.md5()
                 size = 0
                 overflow = False

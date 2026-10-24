@@ -20,20 +20,22 @@ main.py 只做两件事：把这里的 `Monitor` 按时叫醒，把它吐出来�
 
 from __future__ import annotations
 
+import asyncio
+import math
 import time
 from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Sequence
+from urllib.parse import urlsplit
 
 from . import probes, render, sources
 from .config import LocalConfig
 from .http import HttpClient
-from .models import FileEntry, Mirror, ProbeResult
+from .models import FileEntry, Mirror, ProbeResult, manifest_fingerprint
 from .scheduler import CoverageReport, HotPackagePolicy, Rotation, Ticker
-from .sources import Discovered, PROBE_SOURCE, Source, host_of
+from .sources import Discovered, PROBE_SOURCE, Source
 from .state import AlertState
 
 NOTE_CLIENT_VERSION = "client_version"
-NOTE_MIRROR_CURSOR = "mirror_cursor"
 
 
 @dataclass
@@ -75,6 +77,12 @@ class Monitor:
         # 最近一次拿到的清单：`/线路 覆盖率` 要拿它当分母，没有清单就说不出
         # 覆盖率（而不是报一个 0% 或 100%，那两个数都在骗人）。
         self.last_entries: Dict[str, FileEntry] = {}
+        self.last_mirror_names: List[str] = []
+        self.last_discovered: Optional[Discovered] = None
+        self.last_entry_result: Optional[ProbeResult] = None
+        self.hot_failures: Dict[str, float] = {}
+        self.all_down_probes = set()
+        self.mirror_targets: Dict[str, str] = {}
 
     # ── 一轮 ────────────────────────────────────────────────
     async def run_cycle(self, *, slow: bool = False, only_mirror: Optional[str] = None,
@@ -90,8 +98,11 @@ class Monitor:
         out = CycleOutcome()
 
         entry_result, disc = await self.source.discover(self.client)
+        self.last_entry_result = entry_result
+        self.last_discovered = disc
         out.results.append(entry_result)
         if disc is None:
+            self.last_entries = {}
             # 入口挂了：**不是就此收工**。这时候恰恰最需要信息——是配置内容被人
             # 改坏了，还是这个出口挂了？线路那边是不是也一起挂了？所以这里不判绿，
             # 但继续用能拿到的线索探一轮，把结论附在那条 P0 后面。
@@ -103,30 +114,43 @@ class Monitor:
             self.last_results = out.results
             return out
 
-        out.results.extend(probes.check_config_mutation(disc, self.last_good_snapshot))
-        self.last_good_snapshot = disc.snapshot()
-        self.last_good_at = now
+        mutations = probes.check_config_mutation(disc, self.last_good_snapshot)
+        out.results.extend(mutations)
         out.config = disc
-        out.results.extend(probes.check_config_sanity(
-            disc, self.state.note(NOTE_CLIENT_VERSION)))
-        if disc.client_version:
-            self.state.remember(NOTE_CLIENT_VERSION, disc.client_version)
+        sanity = probes.check_config_sanity(disc, self.state.note(NOTE_CLIENT_VERSION))
+        out.results.extend(sanity)
 
         # 线路表来自配置源＝远端内容：先挡住指向本机/内网的地址，再拿去探。
         safe_mirrors, blocked = probes.check_mirror_targets(disc)
         out.results.extend(blocked)
+        self.last_mirror_names = [m.name for m in disc.enabled_mirrors]
+        self._sync_targets(disc)
+        # 异常配置仍可用来诊断，但不能立刻成为下一轮的健康基准。
+        if not any(r.counts_as_failure() for r in [entry_result, *mutations, *sanity, *blocked]):
+            self.last_good_snapshot = disc.snapshot()
+            self.last_good_at = now
+            if disc.client_version:
+                self.state.remember(NOTE_CLIENT_VERSION, disc.client_version)
         mirrors = [m for m in safe_mirrors
                    if only_mirror is None or m.name == only_mirror]
         if only_mirror is not None and not mirrors:
             out.results.append(ProbeResult(
                 ok=True, probe="人工检查", target=only_mirror,
                 detail="线上配置里没有这条启用的线路", unknown=True))
+            out.messages = self._notify(out.results, enabled_mirrors=len(self.last_mirror_names),
+                                        now=now, entry_result=entry_result)
             self.last_results = out.results
             return out
 
         per_mirror: Dict[str, Dict[str, FileEntry]] = {}
-        for mirror in mirrors:
-            result, entries = await probes.probe_manifest(self.client, mirror)
+        manifest_slots = asyncio.Semaphore(4)
+
+        async def fetch_manifest(mirror):
+            async with manifest_slots:
+                result, entries = await probes.probe_manifest(self.client, mirror)
+                return mirror, result, entries
+
+        for mirror, result, entries in await asyncio.gather(*(fetch_manifest(m) for m in mirrors)):
             out.results.append(result)
             if entries:
                 per_mirror[mirror.name] = entries
@@ -137,20 +161,67 @@ class Monitor:
         # 拿它当基准只会让块校验跟着报一遍同一件事。
         reference = _majority_manifest(per_mirror)
         out.entries = reference
+        self.last_entries = reference
         if reference:
-            self.last_entries = reference
-        if reference:
-            self.rotation.prune(reference)
+            self.rotation.prune(reference, mirror_names=self.last_mirror_names)
             out.results.extend(await self._chunk_round(mirrors, reference, disc, now))
-            out.coverage = self.rotation.coverage(reference, now=now)
-
-        if slow:
-            out.results.extend(await self._slow_round(disc, mirrors, now, allow_heavy))
+            out.coverage = self.rotation.coverage(
+                reference, now=now, mirror_names=self.last_mirror_names)
 
         out.messages = self._notify(out.results, enabled_mirrors=len(disc.enabled_mirrors),
                                     now=now, entry_result=entry_result)
         self.last_results = out.results
+        if slow:
+            slow_out = await self.run_slow_cycle(disc, mirrors=mirrors, now=now,
+                                                 allow_heavy=allow_heavy)
+            out.results.extend(slow_out.results)
+            out.messages.extend(slow_out.messages)
         return out
+
+    def _sync_targets(self, disc: Discovered):
+        current = {m.name: m.base for m in disc.mirrors}
+        retired = {name for name, base in self.mirror_targets.items()
+                   if current.get(name) != base}
+        if retired:
+            # 同名线路换了地址时，旧故障与旧覆盖都不能证明新目标的状态。
+            for key, entry in list(self.state.entries.items()):
+                result = entry.result or {}
+                extra = result.get("extra", {})
+                mirror = extra.get("mirror") if isinstance(extra, dict) else None
+                if isinstance(mirror, str) and mirror in retired:
+                    del self.state.entries[key]
+            self.rotation = Rotation()
+            for ledger in (self.last_versions, self.ticker.last):
+                for key in list(ledger):
+                    if any(key.startswith(name + "|") for name in retired):
+                        ledger.pop(key, None)
+        valid_packages = {"%s|%s" % (m.name, disc.packages[name])
+                          for m in disc.enabled_mirrors for name in disc.version_files
+                          if name in disc.packages}
+        self.hot_failures = {key: value for key, value in self.hot_failures.items()
+                             if key in valid_packages
+                             and not any(key.startswith(name + "|") for name in retired)}
+        self.mirror_targets = current
+
+    async def run_slow_cycle(self, disc: Discovered, *, mirrors=None,
+                             now: Optional[float] = None,
+                             allow_heavy: bool = True) -> CycleOutcome:
+        """独立慢任务；网络等待不占用快速巡检的锁。"""
+        now = time.time() if now is None else now
+        safe, _ = probes.check_mirror_targets(disc)
+        selected = safe if mirrors is None else [m for m in mirrors if m in safe]
+        results = await self._slow_round(disc, selected, now, allow_heavy)
+        # 慢任务期间源可能已换配置，旧检查只能作线索，不能覆盖新配置的状态。
+        if self.last_discovered is None or self.last_discovered.snapshot() != disc.snapshot():
+            results = [replace(r, unknown=True, detail="旧配置任务，仅供参考：" + r.detail)
+                       for r in results]
+        entry = self.last_entry_result or ProbeResult(
+            ok=True, probe=PROBE_SOURCE, target="配置源", detail="配置源未判定", unknown=True)
+        messages = self._notify(results, enabled_mirrors=len(self.last_mirror_names),
+                                now=now, entry_result=entry)
+        keys = {r.key for r in results}
+        self.last_results = [r for r in self.last_results if r.key not in keys] + results
+        return CycleOutcome(results=results, messages=messages, config=disc)
 
     # ── 入口挂掉时的降级诊断 ────────────────────────────────
     async def _diagnose_entry_failure(self, now: float) -> "Degraded":
@@ -184,7 +255,7 @@ class Monitor:
             return deg
 
         stale = Discovered.from_snapshot(self.last_good_snapshot)
-        mirrors = stale.enabled_mirrors if stale else []
+        mirrors, _ = probes.check_mirror_targets(stale) if stale else ([], [])
         if not mirrors:
             return deg
         alive = 0
@@ -217,22 +288,21 @@ class Monitor:
         out: List[ProbeResult] = []
         if not mirrors:
             return out
-        picks = self.rotation.plan(entries, self.cfg.schedule.chunk_probes_per_cycle)
-        cursor = int(self.state.note(NOTE_MIRROR_CURSOR) or 0)
+        by_name = {m.name: m for m in mirrors}
+        picks = self.rotation.plan_for_mirrors(
+            entries, list(by_name), self.cfg.schedule.chunk_probes_per_cycle)
         min_speed = disc.threshold("min_speed_kbps")
-        for entry, index in picks:
-            mirror = mirrors[cursor % len(mirrors)]
-            cursor += 1
+        for mirror_name, entry, index in picks:
+            mirror = by_name[mirror_name]
             results = await probes.probe_chunk(self.client, mirror, entry, index,
                                                min_speed_kbps=min_speed)
             out.extend(results)
-            if all(r.ok for r in results):
-                self.rotation.mark(entry.name, index, now)
+            if any(r.probe == probes.PROBE_CHUNK and r.ok and not r.unknown for r in results):
+                self.rotation.mark(entry.name, index, now, mirror=mirror_name)
             else:
                 # 没验成的块**不记进覆盖**，但游标照样往前走：卡在坏块上反复
                 # 重试，会让其余几百块永远轮不到。
-                self.rotation.cursor = self.rotation.token(entry.name, index)
-        self.state.remember(NOTE_MIRROR_CURSOR, str(cursor % max(len(mirrors), 1)))
+                self.rotation.advance(entry.name, index, mirror=mirror_name)
         return out
 
     # ── 慢周期 ──────────────────────────────────────────────
@@ -246,30 +316,66 @@ class Monitor:
                 detail="配置源没有声明要探哪些热更版本文件，跳过热更相关探针"
                        "（不知道该探什么时保持沉默，比拿一份猜的清单去报警好）",
                 unknown=True))
-            return out
 
-        for mirror in mirrors:
-            for name in version_files:
+        # 限制整包并发，快周期使用同一客户端但不等待这里的下载。
+        semaphore = asyncio.Semaphore(2)
+
+        async def check_version(mirror, name):
+            async with semaphore:
+                found = []
                 result, meta = await probes.probe_version_json(self.client, mirror, name)
-                out.append(result)
+                found.append(result)
                 if meta is None or not meta.is_valid():
-                    continue
+                    return found
                 package = disc.packages.get(name)
                 if not package or not allow_heavy:
-                    continue
+                    return found
                 key = "%s|%s" % (mirror.name, package)
-                if not self.hot_policy.should_check(key, meta.version, self.ticker,
-                                                    self.last_versions, now):
-                    continue
-                out.append(await probes.probe_hot_package(self.client, mirror,
-                                                          package, meta))
-                self.ticker.mark(key, now)
-                self.last_versions[key] = meta.version
+                last_failure = self.hot_failures.get(key)
+                if last_failure is not None:
+                    if now - last_failure < self.cfg.schedule.interval_fast_seconds:
+                        return found
+                elif not self.hot_policy.should_check(key, meta.version, self.ticker,
+                                                       self.last_versions, now):
+                    return found
+                checked = await probes.probe_hot_package(self.client, mirror, package, meta)
+                found.append(checked)
+                current = self.last_discovered and self.last_discovered.snapshot() == disc.snapshot()
+                if not current:
+                    return found
+                if checked.ok and not checked.unknown:
+                    entry = self.state.entries.get(checked.key)
+                    recovering = (self.state.is_firing(checked.key) and entry is not None
+                                  and entry.successes + 1 < self.state.recover_after)
+                    if recovering:
+                        self.hot_failures[key] = now
+                    else:
+                        self.ticker.mark(key, now)
+                        self.last_versions[key] = meta.version
+                        self.hot_failures.pop(key, None)
+                else:
+                    # 失败确认走短间隔，不能被成功检查的六小时间隔吞掉。
+                    self.hot_failures[key] = now
+                return found
 
-        for host in sorted({host_of(m.base) for m in mirrors if host_of(m.base)}):
-            if self.ticker.due("tls|%s" % host, 86400.0, now):
-                out.append(await probes.probe_tls_expiry(host, now=now))
-                self.ticker.mark("tls|%s" % host, now)
+        async def check_tls(host, port):
+            key = "tls|%s|%d" % (host, port)
+            if not self.ticker.due(key, 86400.0, now):
+                return []
+            result = await probes.probe_tls_expiry(host, port, now=now)
+            if self.last_discovered and self.last_discovered.snapshot() == disc.snapshot():
+                self.ticker.mark(key, now)
+            return [result]
+
+        jobs = [check_version(m, name) for m in mirrors for name in version_files]
+        tls_targets = set()
+        for mirror in mirrors:
+            parsed = urlsplit(mirror.base)
+            if parsed.scheme == "https" and parsed.hostname:
+                tls_targets.add((parsed.hostname, parsed.port or 443))
+        jobs.extend(check_tls(host, port) for host, port in sorted(tls_targets))
+        for found in await asyncio.gather(*jobs):
+            out.extend(found)
         return out
 
     # ── 出消息 ──────────────────────────────────────────────
@@ -277,22 +383,39 @@ class Monitor:
                 now: float, entry_result: ProbeResult,
                 extra_lines: Optional[Sequence[str]] = None) -> List[str]:
         notes = self.state.ingest(results, now=now)
+        active = self.state.active_results()
+        by_probe = {}
+        for r in active:
+            by_probe.setdefault(r.probe, []).append(r)
+        current_outages = {probe for probe, group in by_probe.items()
+                           if render.all_mirrors_down(group, self.last_mirror_names)}
+        previous_outages = set(self.all_down_probes)
+        # 未发出的静音/抑制事件不消耗首次升级提醒。
+        self.all_down_probes &= current_outages
         if not notes:
             return []
         line = render.upstream_line(entry_result.ok and not entry_result.unknown,
                                     entry_result.detail, now)
         messages = []
-        for group in render.group_notifications(notes, enabled_mirrors):
+        for group in render.group_notifications(
+                notes, enabled_mirrors, active_results=active,
+                mirror_names=self.last_mirror_names):
             # 入口自己那条不需要再附一行「上游正常」——它就是上游。
             is_entry = group[0].result.probe == PROBE_SOURCE
             # 入口自己那条不需要再附一行「上游正常」——它就是上游。它要附的是
             # 降级诊断：坏到什么程度、下一步该去哪。
-            messages.append(render.render_group(
+            message = render.render_group(
                 group, enabled_mirrors=enabled_mirrors,
+                mirror_names=self.last_mirror_names,
                 prefix=self.cfg.notify.prefix,
                 at_all=self.cfg.notify.at_all_on_p0,
                 upstream_line="" if is_entry else line,
-                extra_lines=list(extra_lines or []) if is_entry else None))
+                extra_lines=list(extra_lines or []) if is_entry else None)
+            if group[0].result.probe in previous_outages:
+                message.at_all = False
+            if group[0].result.probe in current_outages:
+                self.all_down_probes.add(group[0].result.probe)
+            messages.append(message)
         return messages
 
     # ── 落盘 ────────────────────────────────────────────────
@@ -301,6 +424,9 @@ class Monitor:
         data["rotation"] = self.rotation.to_dict()
         data["ticker"] = self.ticker.to_dict()
         data["last_versions"] = dict(self.last_versions)
+        data["hot_failures"] = dict(self.hot_failures)
+        data["all_down_probes"] = sorted(self.all_down_probes)
+        data["mirror_targets"] = dict(self.mirror_targets)
         # 好配置也落盘：bot 重启后入口正好是挂的，没有它就连「线路是不是也挂了」
         # 都答不上来——而那是重启后第一条告警最该回答的问题。
         data["last_good_config"] = self.last_good_snapshot
@@ -315,14 +441,27 @@ class Monitor:
         self.ticker = Ticker.from_dict(data.get("ticker"))
         lv = data.get("last_versions")
         if isinstance(lv, dict):
-            self.last_versions = {str(k): int(v) for k, v in lv.items()
-                                  if str(v).lstrip("-").isdigit()}
+            self.last_versions = {}
+            for k, v in lv.items():
+                try:
+                    self.last_versions[str(k)] = int(v)
+                except (ValueError, TypeError, OverflowError):
+                    continue
+        self.hot_failures = Ticker.from_dict(data.get("hot_failures")).last
+        outages = data.get("all_down_probes")
+        self.all_down_probes = {s for s in outages if isinstance(s, str)} if isinstance(outages, list) else set()
+        targets = data.get("mirror_targets")
+        self.mirror_targets = {k: v for k, v in targets.items()
+                               if isinstance(k, str) and isinstance(v, str)} if isinstance(targets, dict) else {}
         good = data.get("last_good_config")
         if isinstance(good, dict):
-            self.last_good_snapshot = good
+            restored = Discovered.from_snapshot(good)
+            self.last_good_snapshot = restored.snapshot() if restored else None
             try:
                 self.last_good_at = float(data.get("last_good_at") or 0.0)
-            except (TypeError, ValueError):
+                if not math.isfinite(self.last_good_at):
+                    self.last_good_at = 0.0
+            except (TypeError, ValueError, OverflowError):
                 self.last_good_at = 0.0
 
 
@@ -336,16 +475,15 @@ class Degraded:
 
 def _majority_manifest(per_mirror: Dict[str, Dict[str, FileEntry]]
                        ) -> Dict[str, FileEntry]:
-    """取出现次数最多的那份清单。平票时取文件数最多的一份（能验的更多）。"""
+    """按完整内容取严格多数；没有多数时不拿任意一份给其他线路定罪。"""
     if not per_mirror:
         return {}
     buckets: Dict[str, List[Dict[str, FileEntry]]] = {}
     for entries in per_mirror.values():
-        fp = "|".join("%s:%d:%d" % (n, e.size, e.chunk_size)
-                      for n, e in sorted(entries.items()))
+        fp = manifest_fingerprint(entries)
         buckets.setdefault(fp, []).append(entries)
     best = max(buckets.values(), key=lambda group: (len(group), len(group[0])))
-    return best[0]
+    return best[0] if len(best) * 2 > len(per_mirror) else {}
 
 
 

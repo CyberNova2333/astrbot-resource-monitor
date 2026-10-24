@@ -16,14 +16,17 @@ from typing import Optional
 def save_json(path: str, data: dict) -> Optional[str]:
     """尽力而为地写。成功返回 None，失败返回一句给日志看的话。
 
-    **写不进去不是致命错误**：这里存的是故障状态机，可丢，丢了最多重报一次。
-    为它让整个监控崩掉是本末倒置（铁律 7）。
+    写不进去时让调用方保留内存状态并重试：这里还包含待发通知，不能当作已经
+    保存成功。探测继续运行，不因存储故障停掉整个监控（铁律 7）。
     """
     try:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
+            # 通知必须先记录再发送；仅关闭文件仍可能只写到操作系统缓存。
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)      # 原子替换：中途挂掉也不会留半截文件
         return None
     except (OSError, TypeError, ValueError) as e:

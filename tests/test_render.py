@@ -39,7 +39,9 @@ class GroupTest(unittest.TestCase):
         p0 = render.render_group([fire("甲", "x"), fire("乙", "y")],
                                  enabled_mirrors=2, at_all=True)
         p1 = render.render_group([fire("甲", "x")], enabled_mirrors=3, at_all=True)
-        self.assertIn("@全体成员", p0)
+        self.assertTrue(p0.at_all)
+        self.assertFalse(p1.at_all)
+        self.assertNotIn("@全体成员", p0)
         self.assertNotIn("@全体成员", p1)
 
     def test_columns_line_up_with_cjk_names(self):
