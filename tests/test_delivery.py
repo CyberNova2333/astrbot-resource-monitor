@@ -1,55 +1,16 @@
 """用框架替身验证命令、后台任务与持久化发送队列，不连接聊天平台。"""
 
 import asyncio
-import importlib.util
-from pathlib import Path
-import sys
 import tempfile
 import types
 import unittest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, patch
 
+from tests.astrbot_stub import load_plugin
 from tests.test_runner import A, B, cfg, healthy_client
 from watch import commands, render, store
 from watch.runner import CycleOutcome, Monitor
 from watch.sources import Discovered
-
-
-class Chain:
-    def __init__(self):
-        self.text = ""
-        self.mention_all = False
-
-    def message(self, text):
-        self.text += text
-        return self
-
-    def at_all(self):
-        self.mention_all = True
-        return self
-
-
-class Star:
-    def __init__(self, context):
-        self.context = context
-
-
-def load_plugin():
-    modules = {name: types.ModuleType(name) for name in
-               ("astrbot", "astrbot.api", "astrbot.api.event", "astrbot.api.star")}
-    modules["astrbot.api"].logger = Mock()
-    event = modules["astrbot.api.event"]
-    event.AstrMessageEvent = object
-    event.MessageChain = Chain
-    event.filter = types.SimpleNamespace(command=lambda *a, **kw: lambda f: f)
-    star = modules["astrbot.api.star"]
-    star.Star, star.Context = Star, object
-    star.register = lambda *a: lambda cls: cls
-    spec = importlib.util.spec_from_file_location("resource_watch_test_glue", Path(__file__).parents[1] / "main.py")
-    module = importlib.util.module_from_spec(spec)
-    with patch.dict(sys.modules, modules):
-        spec.loader.exec_module(module)
-    return module
 
 
 glue = load_plugin()

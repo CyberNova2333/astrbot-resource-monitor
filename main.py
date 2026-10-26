@@ -24,10 +24,11 @@ from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.star import Context, Star, register
 
-from watch import commands, render, store
-from watch.config import ConfigError, LocalConfig, load as load_config
-from watch.http import AiohttpClient
-from watch.runner import Monitor
+# 框架以 data.plugins.<插件目录>.main 加载；绝对导入会误找顶层同名模块。
+from .watch import commands, render, store
+from .watch.config import ConfigError, LocalConfig, load as load_config
+from .watch.http import AiohttpClient
+from .watch.runner import Monitor
 
 PLUGIN_NAME = "astrbot_plugin_resource_watch"
 CONFIG_FILE_ENV = "RESOURCE_WATCH_CONFIG"      # 本地配置文件路径（可选）
