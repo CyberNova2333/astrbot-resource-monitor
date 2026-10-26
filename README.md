@@ -72,6 +72,8 @@ flowchart TB
 
 本地配置模板见 [config.example.json](config.example.json)，字段定义见 [_conf_schema.json](_conf_schema.json)。真实地址、通知会话与凭据只保存在部署侧。
 
+插件内部使用包内相对导入，可由 AstrBot 按插件包加载，无需把插件目录加入 `PYTHONPATH`。更新时保留完整的 `main.py` 与 `watch/` 目录。
+
 插件统一使用 `astrbot_plugin_resource_watch` 标识，入口类为 `ResourceWatch`，默认 User-Agent 为 `resource-watch/1.0`。WebUI 配置缺失或不可用时，可通过环境变量 `RESOURCE_WATCH_CONFIG` 指定本地 JSON 配置文件；有效的 WebUI 配置优先。
 
 配置源的数组、线路字段与地址必须符合声明类型，数值必须有限且在支持范围内；无效配置会明确报错，并在指定本地配置文件时尝试回退。旧入口写法、单个入口字符串和 WebUI 的“名称=地址”线路写法仍可使用。
