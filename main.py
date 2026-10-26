@@ -178,6 +178,13 @@ class ResourceWatch(Star):
                 if not item["assigned"]:
                     continue
                 for session in list(item["remaining"]):
+                    # 同一通知的上一个会话也可能等待很久；维护或恢复应立即阻止续发。
+                    if self.monitor.state.is_muted():
+                        return
+                    if self._discard_stale(item):
+                        if not self._persist():
+                            return
+                        break
                     if session in failed_sessions:
                         continue
                     try:

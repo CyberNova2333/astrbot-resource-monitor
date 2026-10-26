@@ -155,6 +155,72 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all("恢复" in call.args[1].text for call in
                             self.context.send_message.await_args_list[1:]))
 
+    async def test_mute_during_first_recipient_holds_same_notice_for_next_recipient(self):
+        plugin = self.plugin
+        plugin.cfg.notify.sessions = ["群甲", "群乙"]
+        plugin._queue_messages(["待发通知"])
+        sending, resume = asyncio.Event(), asyncio.Event()
+
+        async def send(session, chain):
+            if session == "群甲":
+                sending.set()
+                await resume.wait()
+            return True
+
+        self.context.send_message.side_effect = send
+        delivery = asyncio.create_task(plugin._flush_outbox())
+        try:
+            await asyncio.wait_for(sending.wait(), timeout=5)
+            plugin.monitor.state.mute(60)
+        finally:
+            resume.set()
+            await delivery
+
+        self.context.send_message.assert_awaited_once()
+        self.assertEqual(plugin._outbox[0]["remaining"], ["群乙"])
+        plugin.monitor.state.unmute()
+        await plugin._flush_outbox()
+        self.assertEqual([call.args[0] for call in
+                          self.context.send_message.await_args_list], ["群甲", "群乙"])
+        self.assertFalse(plugin._outbox)
+
+    async def test_recovery_during_first_recipient_discards_same_failure_for_next_recipient(self):
+        plugin = self.plugin
+        plugin.cfg.notify.sessions = ["群甲", "群乙"]
+        for base in (A, B):
+            plugin.monitor.client.raw(base + "manifest.json", b"", status=502)
+        failed = await plugin.monitor.run_cycle(now=1000)
+        self.assertEqual(len(failed.messages), 1)
+        plugin._queue_messages(failed.messages)
+        sending, resume = asyncio.Event(), asyncio.Event()
+
+        async def send(session, chain):
+            if session == "群甲" and "失败" in chain.text:
+                sending.set()
+                await resume.wait()
+            return True
+
+        self.context.send_message.side_effect = send
+        delivery = asyncio.create_task(plugin._flush_outbox())
+        try:
+            await asyncio.wait_for(sending.wait(), timeout=5)
+            plugin.monitor.client = healthy_client()
+            recovered = await plugin.monitor.run_cycle(now=1300)
+            self.assertTrue(recovered.messages)
+            plugin._queue_messages(recovered.messages)
+        finally:
+            resume.set()
+            await delivery
+
+        self.context.send_message.assert_awaited_once()
+        self.assertEqual(self.context.send_message.await_args.args[0], "群甲")
+        self.assertTrue(all(item["kind"] == "recover" for item in plugin._outbox))
+        await plugin._flush_outbox()
+        self.assertFalse(plugin._outbox)
+        recovery_calls = self.context.send_message.await_args_list[1:]
+        self.assertEqual([call.args[0] for call in recovery_calls], ["群甲", "群乙"])
+        self.assertTrue(all("恢复" in call.args[1].text for call in recovery_calls))
+
     async def test_background_fast_cycles_continue_while_slow_task_waits(self):
         plugin = self.plugin
         plugin.cfg.schedule.interval_fast_seconds = 0.001
