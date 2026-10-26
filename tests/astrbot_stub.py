@@ -11,6 +11,8 @@ class Chain:
     def __init__(self):
         self.text = ""
         self.mention_all = False
+        self.use_markdown_ = None
+        self.use_t2i_ = None
 
     def message(self, text):
         self.text += text
@@ -19,6 +21,15 @@ class Chain:
     def at_all(self):
         self.mention_all = True
         return self
+
+    def use_markdown(self, value=True):
+        self.use_markdown_ = value
+        return self
+
+    def use_t2i(self, value):
+        self.use_t2i_ = value
+        return self
+
 
 class Star:
     def __init__(self, context):

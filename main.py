@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import math
 import os
+import re
 import time
 from typing import List, Optional
 
@@ -32,6 +33,7 @@ from .watch.runner import Monitor
 
 PLUGIN_NAME = "astrbot_plugin_resource_watch"
 CONFIG_FILE_ENV = "RESOURCE_WATCH_CONFIG"      # 本地配置文件路径（可选）
+QQ_OFFICIAL_PLATFORMS = frozenset({"qq_official", "qq_official_webhook"})
 
 
 @register(PLUGIN_NAME, "Resource Monitor Contributors",
@@ -49,6 +51,8 @@ class ResourceWatch(Star):
         self._outbox: List[dict] = []
         self._outbox_event = asyncio.Event()
         self._delivery_lock = asyncio.Lock()
+        # QQ 的框架返回值只表示调用完成，不能据此丢掉告警；由查看者明确确认。
+        self._shown_notifications = {}
         self._stop = asyncio.Event()
         self.gate: Optional[commands.CommandGate] = None
         # 一次只跑一轮。没有这把锁的话，群里一条命令就能和后台循环**并发**跑：
@@ -135,6 +139,7 @@ class ResourceWatch(Star):
                                  "at_all": bool(getattr(message, "at_all", False)),
                                  "kind": getattr(message, "kind", ""),
                                  "keys": list(getattr(message, "keys", ())),
+                                 "submitted": [],
                                  "remaining": list(dict.fromkeys(self.cfg.notify.sessions)),
                                  "assigned": bool(self.cfg.notify.sessions)})
         self._persist()
@@ -159,39 +164,35 @@ class ResourceWatch(Star):
             return
         async with self._delivery_lock:
             # 磁盘不可写时先保留内存队列；避免状态已推进但通知没有可恢复记录。
-            if not self._persist():
+            if not self._prepare_outbox():
                 return
             failed_sessions = set()
-            allowed = set(self.cfg.notify.sessions)
             for item in list(self._outbox):
                 if self.monitor.state.is_muted():
                     break
-                keys = item.get("keys", [])
-                if item.get("kind") in ("fire", "remind") and keys and any(
-                        not self.monitor.state.is_firing(key) for key in keys):
-                    # 静音或发送失败期间已经恢复的旧故障，不再补发过时的红灯。
-                    for key in keys:
-                        if self.monitor.state.is_firing(key):
-                            self.monitor.state.entries[key].has_notified = False
-                    self._outbox.remove(item)
+                # 上一条发送期间探测仍在运行；后续通知必须按最新状态再检查。
+                if self._discard_stale(item):
                     if not self._persist():
                         return
                     continue
                 if not item["assigned"]:
-                    item["remaining"] = list(dict.fromkeys(self.cfg.notify.sessions))
-                    item["assigned"] = bool(item["remaining"])
-                if not item["assigned"]:
                     continue
-                # 配置移除的收件会话不继续投递旧通知。
-                item["remaining"] = [s for s in item["remaining"] if s in allowed]
-                if not self._persist():
-                    return
                 for session in list(item["remaining"]):
                     if session in failed_sessions:
                         continue
                     try:
-                        chain = MessageChain().message(item["text"])
-                        if item["at_all"]:
+                        meta = self._platform_meta(session)
+                        if meta is None:
+                            raise RuntimeError("未找到会话对应的平台，等待适配器就绪")
+                        official = getattr(meta, "name", "") in QQ_OFFICIAL_PLATFORMS
+                        if official and (session in item["submitted"] or not
+                                         getattr(meta, "support_proactive_message", False)):
+                            continue
+                        chain = MessageChain().message(
+                            _qq_text(item["text"]) if official else item["text"])
+                        if official:
+                            _plain_chain(chain)
+                        elif item["at_all"]:
                             chain.at_all()
                         result = await asyncio.wait_for(
                             self.context.send_message(session, chain), timeout=30.0)
@@ -201,13 +202,105 @@ class ResourceWatch(Star):
                         failed_sessions.add(session)
                         logger.error("[线路监控] 通知发送失败，已保留重试：%s", e)
                         continue
-                    item["remaining"].remove(session)
+                    if official:
+                        # 不反复消耗 QQ 的推送额度；通知仍可查询，直到人工确认。
+                        item["submitted"].append(session)
+                    else:
+                        item["remaining"].remove(session)
                     if not self._persist():
                         return
                 if not item["remaining"]:
                     self._outbox.remove(item)
                     if not self._persist():
                         return
+
+    def _platform_meta(self, session):
+        """UMO 第一段是平台实例 ID，不能拿它与适配器类型直接比较。"""
+        platform_id = session.split(":", 1)[0]
+        getter = getattr(self.context, "get_platform_inst", None)
+        if callable(getter):
+            platform = getter(platform_id)
+            if platform is not None:
+                return platform.meta()
+        # 兼容旧版用平台名称组成 UMO 的方式，仍以真实适配器元数据为准。
+        manager = getattr(self.context, "platform_manager", None)
+        get_insts = getattr(manager, "get_insts", None)
+        if callable(get_insts):
+            for platform in get_insts():
+                meta = platform.meta()
+                if platform_id in (getattr(meta, "id", None), meta.name):
+                    return meta
+        return None
+
+    def _discard_stale(self, item):
+        keys = item.get("keys", [])
+        if item.get("kind") in ("fire", "remind") and keys and any(
+                not self.monitor.state.is_firing(key) for key in keys):
+            for key in keys:
+                if self.monitor.state.is_firing(key):
+                    self.monitor.state.entries[key].has_notified = False
+            self._outbox.remove(item)
+            return True
+        return False
+
+    def _prepare_outbox(self):
+        """投递与查询共用过期清理，避免查询出已经恢复或已移除收件人的旧告警。"""
+        if not self._persist():
+            return False
+        allowed = set(self.cfg.notify.sessions)
+        for item in list(self._outbox):
+            if self._discard_stale(item):
+                continue
+            if not item["assigned"]:
+                item["remaining"] = list(dict.fromkeys(self.cfg.notify.sessions))
+                item["assigned"] = bool(item["remaining"])
+            item["remaining"] = [s for s in item["remaining"] if s in allowed]
+            item["submitted"] = [s for s in item.get("submitted", []) if s in item["remaining"]]
+            if item["assigned"] and not item["remaining"]:
+                self._outbox.remove(item)
+        # 不保留已过期的查看引用，以免长时间运行后累积无效通知。
+        self._shown_notifications = {
+            key: shown for key, shown in self._shown_notifications.items()
+            if any(item is shown for item in self._outbox) and key[0] in shown["remaining"]}
+        return self._persist()
+
+    async def _pending_notification(self, event):
+        async with self._delivery_lock:
+            viewer = (_session_of(event), _sender_of(event))
+            self._shown_notifications.pop(viewer, None)
+            if self.monitor.state.is_muted():
+                return "当前处于静音窗口，待处理通知暂缓展示。"
+            if not self._prepare_outbox():
+                return "状态暂时无法保存，请稍后再查通知。"
+            pending = [item for item in self._outbox if viewer[0] in item["remaining"]]
+            if not pending:
+                return "本会话没有待处理通知。"
+            # 只保留有确认权限的查看者，且确认绑定本人和具体对象，不按可变化的序号。
+            if viewer[1] and _is_admin(event):
+                self._shown_notifications[viewer] = pending[0]
+            return ("待处理通知（共 %d 条，显示最早一条）：\n%s\n\n"
+                    "查看不会清除通知；管理员查看后用 /线路 确认，再查下一条。"
+                    % (len(pending), pending[0]["text"]))
+
+    async def _confirm_notification(self, event):
+        async with self._delivery_lock:
+            viewer = (_session_of(event), _sender_of(event))
+            if not viewer[1]:
+                return "无法识别当前用户，不能确认通知。"
+            if not self._prepare_outbox():
+                return "状态暂时无法保存，通知尚未确认。"
+            item = self._shown_notifications.pop(viewer, None)
+            if item is None:
+                return "请先用 /线路 通知 查看当前通知，再确认；重启或通知过期后需重新查看。"
+            previous = list(item["remaining"])
+            item["remaining"].remove(viewer[0])
+            if not self._persist():
+                item["remaining"] = previous
+                self._shown_notifications[viewer] = item
+                return "状态保存失败，通知尚未确认，请稍后重试。"
+            if not item["remaining"]:
+                self._outbox.remove(item)
+            return "已确认本会话的这条通知。可用 /线路 通知 继续查看。"
 
     # ── 状态落盘 ────────────────────────────────────────────
     def _state_path(self) -> str:
@@ -246,14 +339,16 @@ class ResourceWatch(Star):
                                      "keys": [k for k in item.get("keys", []) if isinstance(k, str)]
                                      if isinstance(item.get("keys"), list) else [],
                                      "remaining": [s for s in recipients if isinstance(s, str)],
+                                     "submitted": [s for s in item.get("submitted", []) if isinstance(s, str)]
+                                     if isinstance(item.get("submitted"), list) else [],
                                      "assigned": item.get("assigned") is True})
 
     # ── 命令 ────────────────────────────────────────────────
     @filter.command("线路")
     async def route(self, event: AstrMessageEvent):
-        """线路监控：状态 / 测 <线路名> / 配置 / 静音 <时长> / 覆盖率"""
+        """线路监控：状态 / 测 <线路名> / 配置 / 静音 <时长> / 覆盖率 / 通知 / 确认"""
         if not self.monitor or not self.cfg or not self.gate:
-            yield event.plain_result(
+            yield _reply(event,
                 "线路监控没有启动：没有配置源（entry_url 或 mirrors 二选一），见日志。")
             return
 
@@ -266,25 +361,33 @@ class ResourceWatch(Star):
                                          is_admin=_is_admin(event))
         if refuse is not None:
             if refuse:
-                yield event.plain_result(refuse)
+                yield _reply(event, refuse)
             return
 
-        if sub in ("状态", "status"):
-            yield event.plain_result(render.render_status(
+        if sub in ("通知", "notifications"):
+            yield _reply(event, await self._pending_notification(event))
+        elif sub in ("确认", "ack"):
+            # 确认会清掉待发记录，不能随静音权限配置放宽。
+            if not _is_admin(event):
+                yield _reply(event, "只有管理员能确认通知。")
+                return
+            yield _reply(event, await self._confirm_notification(event))
+        elif sub in ("状态", "status"):
+            yield _reply(event, render.render_status(
                 self.monitor.last_results,
                 muted_until=self.monitor.state.muted_until,
                 coverage=self._coverage()))
         elif sub in ("测", "test"):
             name = " ".join(args[1:]).strip()
             if not name:
-                yield event.plain_result("要测哪条线路？用 /线路 配置 看名字。")
+                yield _reply(event, "要测哪条线路？用 /线路 配置 看名字。")
                 return
             if self._cycle_lock.locked():
-                yield event.plain_result("正在跑一轮，等它跑完再来——同时跑两轮"
+                yield _reply(event, "正在跑一轮，等它跑完再来——同时跑两轮"
                                          "只会把流量翻倍，结论还会互相打架。")
                 return
             self.gate.mark(sub)
-            yield event.plain_result("在测「%s」，一轮下来要几十秒……" % render.safe(name))
+            yield _reply(event, "在测「%s」，一轮下来要几十秒……" % render.safe(name))
             async with self._cycle_lock:
                 # allow_heavy=False：命令触发的轮次不下整包（几百 MB）。
                 outcome = await self.monitor.run_cycle(
@@ -298,40 +401,42 @@ class ResourceWatch(Star):
                         mirrors=[m for m in outcome.config.enabled_mirrors if m.name == name])
                     self._queue_messages(slow_out.messages)
                     outcome.results.extend(slow_out.results)
-            yield event.plain_result(render.render_status(outcome.results))
+            yield _reply(event, render.render_status(outcome.results))
         elif sub in ("配置", "config"):
             if self._cycle_lock.locked():
-                yield event.plain_result("正在跑一轮，稍等。")
+                yield _reply(event, "正在跑一轮，稍等。")
                 return
             self.gate.mark(sub)
             async with self._cycle_lock:
                 outcome = await self.monitor.run_cycle(allow_heavy=False)
                 self._queue_messages(outcome.messages)
             if outcome.config is None:
-                yield event.plain_result("拉不到配置源：%s"
+                yield _reply(event, "拉不到配置源：%s"
                                          % render.safe(outcome.results[0].detail, 300))
             else:
-                yield event.plain_result(render.render_online_config(outcome.config))
+                yield _reply(event, render.render_online_config(outcome.config))
         elif sub in ("静音", "mute"):
-            yield event.plain_result(self._mute(event, args[1:]))
+            yield _reply(event, self._mute(event, args[1:]))
         elif sub in ("取消静音", "unmute"):
             self.monitor.state.unmute()
             self._persist()
             self._outbox_event.set()
-            yield event.plain_result("已取消静音。")
+            yield _reply(event, "已取消静音。")
         elif sub in ("覆盖率", "coverage"):
             cov = self._coverage()
-            yield event.plain_result(render.render_coverage(cov) if cov else
+            yield _reply(event, render.render_coverage(cov) if cov else
                                      "还没有拿到清单，说不出覆盖率。")
         else:
-            yield event.plain_result(
+            yield _reply(event,
                 "线路监控：\n"
                 "  /线路 状态         当前红绿一览\n"
                 "  /线路 测 <线路名>   立刻对某条线路跑一轮（管理员，有冷却）\n"
                 "  /线路 配置         配置源的关键字段（管理员，有冷却）\n"
                 "  /线路 静音 30m     维护窗口（管理员）\n"
                 "  /线路 取消静音\n"
-                "  /线路 覆盖率       抽样块校验覆盖到哪了")
+                "  /线路 覆盖率       抽样块校验覆盖到哪了\n"
+                "  /线路 通知         查看本会话最早的待处理通知\n"
+                "  /线路 确认         确认本人刚查看的通知（管理员）")
 
     def _mute(self, event: AstrMessageEvent, rest: List[str]) -> str:
         # 权限已由命令闸门统一判过（watch/commands.py）：静音把所有告警关掉，
@@ -351,6 +456,44 @@ class ResourceWatch(Star):
         entries = self.monitor.last_entries
         return self.monitor.rotation.coverage(
             entries, mirror_names=self.monitor.last_mirror_names) if entries else None
+
+
+def _is_qq_official(event: AstrMessageEvent) -> bool:
+    getter = getattr(event, "get_platform_name", None)
+    if callable(getter):
+        return getter() in QQ_OFFICIAL_PLATFORMS
+    return getattr(getattr(event, "platform_meta", None), "name", "") in QQ_OFFICIAL_PLATFORMS
+
+
+def _plain_chain(chain):
+    # 新版默认 Markdown 可能需要额外权限，监控只需要文本；旧版没有这些开关。
+    for name in ("use_markdown", "use_t2i"):
+        setter = getattr(chain, name, None)
+        if callable(setter):
+            setter(False)
+    return chain
+
+
+def _qq_text(text: str) -> str:
+    # 链接需要平台配置许可，监控回复省略链接；外部字段不能注入 QQ 控制标签。
+    text = re.sub(r"https?://[^\s<>\"']+", "[链接已省略]", text, flags=re.I)
+    return text.replace("<", "＜").replace(">", "＞")
+
+
+def _reply(event: AstrMessageEvent, text: str):
+    if _is_qq_official(event):
+        return _plain_chain(event.plain_result(_qq_text(text)))
+    return event.plain_result(text)
+
+
+def _sender_of(event: AstrMessageEvent) -> str:
+    getter = getattr(event, "get_sender_id", None)
+    if callable(getter):
+        try:
+            return str(getter() or "")
+        except Exception:
+            pass
+    return ""
 
 
 def _args(event: AstrMessageEvent) -> List[str]:

@@ -20,7 +20,11 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.context = types.SimpleNamespace(send_message=AsyncMock(return_value=True))
+        platform = types.SimpleNamespace(
+            meta=lambda: types.SimpleNamespace(name="aiocqhttp"))
+        self.context = types.SimpleNamespace(
+            send_message=AsyncMock(return_value=True),
+            get_platform_inst=lambda platform_id: platform)
         self.plugin = self.make_plugin()
 
     def make_plugin(self):
@@ -98,6 +102,58 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.plugin._outbox), 1)
         await self.plugin._flush_outbox()
         self.assertFalse(self.plugin._outbox)
+
+    async def test_unassigned_notice_waits_until_recipients_are_configured(self):
+        self.plugin.cfg.notify.sessions = []
+        self.plugin._queue_messages(["待发"])
+        await self.plugin._flush_outbox()
+        self.context.send_message.assert_not_awaited()
+        self.assertEqual(len(self.plugin._outbox), 1)
+        self.assertFalse(self.plugin._outbox[0]["assigned"])
+
+        self.plugin.cfg.notify.sessions = ["群甲"]
+        await self.plugin._flush_outbox()
+        self.context.send_message.assert_awaited_once()
+        self.assertEqual(self.context.send_message.await_args.args[0], "群甲")
+        self.assertEqual(self.context.send_message.await_args.args[1].text, "待发")
+        self.assertFalse(self.plugin._outbox)
+
+    async def test_recovery_during_previous_send_discards_later_failure(self):
+        plugin = self.plugin
+        for base in (A, B):
+            plugin.monitor.client.raw(base + "manifest.json", b"", status=502)
+        failed = await plugin.monitor.run_cycle(now=1000)
+        self.assertTrue(failed.messages)
+        plugin._queue_messages(["前置通知", *failed.messages])
+        sending, resume = asyncio.Event(), asyncio.Event()
+
+        async def send(session, chain):
+            if chain.text == "前置通知":
+                sending.set()
+                await resume.wait()
+            return True
+
+        self.context.send_message.side_effect = send
+        delivery = asyncio.create_task(plugin._flush_outbox())
+        try:
+            await asyncio.wait_for(sending.wait(), timeout=5)
+            # 平台发送尚未返回时，另一轮探测已经确认恢复并把恢复通知入队。
+            plugin.monitor.client = healthy_client()
+            recovered = await plugin.monitor.run_cycle(now=1300)
+            self.assertTrue(recovered.messages)
+            plugin._queue_messages(recovered.messages)
+        finally:
+            resume.set()
+            await delivery
+
+        self.context.send_message.assert_awaited_once()
+        self.assertEqual(self.context.send_message.await_args.args[1].text, "前置通知")
+        self.assertTrue(plugin._outbox)
+        self.assertTrue(all(item["kind"] == "recover" for item in plugin._outbox))
+        await plugin._flush_outbox()
+        self.assertFalse(plugin._outbox)
+        self.assertTrue(all("恢复" in call.args[1].text for call in
+                            self.context.send_message.await_args_list[1:]))
 
     async def test_background_fast_cycles_continue_while_slow_task_waits(self):
         plugin = self.plugin
