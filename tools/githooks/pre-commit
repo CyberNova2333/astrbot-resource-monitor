@@ -1,0 +1,18 @@
+#!/bin/sh
+# repo-maintenance-guard: begin
+repo_guard_root=$(git rev-parse --show-toplevel) || exit 1
+repo_guard_found=0
+export PYTHONUTF8=1
+export PYTHONIOENCODING=utf-8
+for repo_guard_python in python3 python "py -3"; do
+    if $repo_guard_python -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1; then
+        repo_guard_found=1
+        $repo_guard_python "$repo_guard_root/tools/repo_maintenance_guard.py" pre-commit "$@" || exit $?
+        break
+    fi
+done
+if [ "$repo_guard_found" != 1 ]; then
+    printf '%s\n' '安全检查需要 Python 3.10+，请安装后重试。' >&2
+    exit 1
+fi
+# repo-maintenance-guard: end

@@ -1,0 +1,9 @@
+# type(scope): 用一句话说明本次变化
+# 类型: feat fix docs style refactor perf test build ci chore revert data
+# 标题最多100字符；项目更严格的中文/类型要求见 AGENTS.md。
+#
+# 原因与影响：
+# 实际验证：写真实命令与结果，未运行需说明。
+# 文档: 写明同步位置，或解释为什么不影响文档。
+#
+# 实际参与者尾注、作者身份与 SSH 签名按 AGENTS.md 填写；不要推测署名。

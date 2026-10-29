@@ -14,3 +14,9 @@ tools/*.py        text eol=lf
 
 # .cmd 反过来：Windows 的批处理必须是 CRLF，否则某些 cmd.exe 版本解析会出错
 tools/*.cmd       text eol=crlf
+
+# Portable repository maintenance hooks
+tools/repo_maintenance_guard.py text eol=lf
+tools/githooks/pre-commit text eol=lf
+tools/githooks/commit-msg text eol=lf
+tools/githooks/pre-push text eol=lf
