@@ -28,3 +28,5 @@ Public test fixtures may be reviewed using an exact-path, exact-content SHA-256 
 
 Revoke or rotate exposed credentials first, then assess history, artifacts and logs. Removing the latest file does not remove older commits. Use an existing private reporting channel; establish a private contact if none is documented, and keep credentials and private data out of public issues.
 <!-- repo-maintenance:end -->
+
+历史扫描使用批量 Git 对象读取；每条新增提交及其中间版本仍在检查范围内。缓存按路径、对象和该提交的精确例外隔离，后续提交撤销例外会重新检查；内存缓存有界，大对象保留原有扫描提示与限制。

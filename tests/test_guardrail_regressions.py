@@ -97,6 +97,13 @@ class ShellParsingTests(unittest.TestCase):
 
 
 class EndpointSyntaxTests(unittest.TestCase):
+    def test_public_documentation_dependency_metadata_is_allowed(self):
+        for host in ('registry.npmjs.org', 'opencollective.com', 'tidelift.com'):
+            with self.subTest(host=host):
+                self.assertTrue(ENDPOINTS.host_allowed(host))
+                self.assertFalse(ENDPOINTS.host_allowed(host + '.untrusted' + '.org'))
+        self.assertIn('noreply.cnb.cool', ENDPOINTS.ALLOWED_MAIL_DOMAINS)
+
     def test_malformed_reserved_urls_remain_safe_parser_fixtures(self):
         for url in ('https://[broken.example.test/', 'https://[broken.invalid/'):
             problems = []
