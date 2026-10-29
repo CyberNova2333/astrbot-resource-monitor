@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import OrderedDict
 import hashlib
 import json
 import os
@@ -11,7 +12,7 @@ import re
 import subprocess
 import sys
 
-VERSION = 1
+VERSION = 2
 MAX_BLOB = 8 * 1024 * 1024
 TYPES = r'feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|data'
 SUBJECT = re.compile(r'^(?:' + TYPES + r')(?:\([A-Za-z0-9_./-]+\))?!?: \S.*$')
@@ -74,9 +75,63 @@ def blocked_path(path: str) -> bool:
     return '设计文稿' in name or 'design-manuscript' in name
 
 
-def allowlist(root: Path, revision: str = '') -> dict:
+class ObjectBatch:
+    """复用 Git 对象管道，避免历史扫描为每个对象反复启动进程。"""
+    def __init__(self):
+        self.check = subprocess.Popen(['git', 'cat-file', '--batch-check'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.reader = subprocess.Popen(['git', 'cat-file', '--batch'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.metadata = {}
+        self.cache = OrderedDict()
+        self.cache_bytes = 0
+
+    def info(self, query):
+        if query not in self.metadata:
+            self.check.stdin.write(query.encode('utf-8') + b'\n')
+            self.check.stdin.flush()
+            fields = self.check.stdout.readline().split()
+            if len(fields) == 2 and fields[1] == b'missing':
+                self.metadata[query] = None
+            elif len(fields) == 3:
+                self.metadata[query] = (fields[0].decode('ascii'), fields[1], int(fields[2]))
+            else:
+                raise ValueError('Git 对象批量查询返回无效结果')
+        return self.metadata[query]
+
+    def read(self, query):
+        info = self.info(query)
+        if info is None:
+            return None
+        oid, _, size = info
+        if size > MAX_BLOB:
+            raise ValueError('拒绝把超出扫描预算的对象载入内存')
+        if oid in self.cache:
+            self.cache.move_to_end(oid)
+            return self.cache[oid]
+        self.reader.stdin.write(oid.encode('ascii') + b'\n')
+        self.reader.stdin.flush()
+        header = self.reader.stdout.readline().split()
+        if len(header) != 3 or header[0].decode('ascii') != oid or int(header[2]) != size:
+            raise ValueError('Git 对象批量读取返回无效结果')
+        data = self.reader.stdout.read(size)
+        if len(data) != size or self.reader.stdout.read(1) != b'\n':
+            raise ValueError('Git 对象批量读取未完整结束')
+        self.cache[oid] = data
+        self.cache_bytes += size
+        while self.cache_bytes > 32 * 1024 * 1024:
+            _, old = self.cache.popitem(last=False)
+            self.cache_bytes -= len(old)
+        return data
+
+    def close(self):
+        for process in (self.check, self.reader):
+            process.stdin.close()
+            process.stdout.close()
+            process.wait(timeout=10)
+
+
+def allowlist(root: Path, revision: str = '', reader=None) -> dict:
     # 例外来自即将提交的 index 或待推送的提交；未暂存工作区不能放宽检查。
-    raw = git('show', revision + ':.repo-security-allowlist.json', check=False)
+    raw = reader.read(revision + ':.repo-security-allowlist.json') if reader else git('show', revision + ':.repo-security-allowlist.json', check=False)
     if not raw:
         return {}
     data = json.loads(raw.decode('utf-8-sig'))
@@ -90,15 +145,16 @@ def allowlist(root: Path, revision: str = '') -> dict:
     return data
 
 
-def scan_blob(path: str, oid: str, exceptions: dict, seen: set[tuple[str, str]]) -> list[str]:
+def scan_blob(path: str, oid: str, exceptions: dict, seen: set[tuple[str, str]], reader=None) -> list[str]:
     key = (path, oid)
     if key in seen:
         return []
     seen.add(key)
-    kind = git('cat-file', '-t', oid).strip()
+    info = reader.info(oid) if reader else None
+    kind = info[1] if reader and info else git('cat-file', '-t', oid).strip()
     if kind != b'blob':
         return []  # Gitlink 不是此仓库可审计的文件内容。
-    size = int(git('cat-file', '-s', oid))
+    size = info[2] if info else int(git('cat-file', '-s', oid))
     errors = []
     if size > MAX_BLOB:
         # 体积上限透明报告；原有 LFS/资产检查继续负责大型二进制。
@@ -106,7 +162,7 @@ def scan_blob(path: str, oid: str, exceptions: dict, seen: set[tuple[str, str]])
         if blocked_path(path):
             errors.append(path + ': sensitive-path')
         return errors
-    blob = git('cat-file', 'blob', oid)
+    blob = reader.read(oid) if reader else git('cat-file', 'blob', oid)
     entry = exceptions.get(path)
     if entry and hashlib.sha256(blob).hexdigest() == entry['sha256']:
         return []
@@ -158,24 +214,36 @@ def pushed(lines: bytes, exceptions: dict) -> list[str]:
                 raise ValueError('本机缺少远端顶点对象，无法确定待推送范围；先 fetch 对应远端再推送')
             args += ['^' + remote.decode() + '^{commit}']
         commits.update(git(*args).decode().splitlines())
-    errors, seen = [], set()
-    for commit in sorted(commits):
-        commit_exceptions = allowlist(repo_root(), commit)
-        errors.extend(commit[:12] + ': ' + error for error in message_problems(git('show', '-s', '--format=%B', commit).decode('utf-8', 'replace')))
-        parts = git('rev-list', '--parents', '-n', '1', commit).decode().split()
-        args = ['diff-tree', '--root', '--no-commit-id', '-r', '--name-only', '--diff-filter=ACMRT', '-z']
-        args += [parts[1], commit] if len(parts) > 1 else [commit]
-        for raw in filter(None, git(*args).split(b'\0')):
-            path = os.fsdecode(raw)
-            # ls-tree 精确匹配 path，避免 : / 通配符在 revision:path 语法中改变含义。
-            entry = git('ls-tree', '-z', commit, '--', path).split(b'\0')[0]
-            if not entry:
-                continue
-            info, _ = entry.split(b'\t', 1)
-            mode, kind, oid = info.split()
-            if mode != b'120000' and kind == b'blob':
-                # 同一 blob 的例外可能随提交改变，不能跨不同例外清单复用判定。
-                errors.extend(scan_blob(path, oid.decode(), commit_exceptions, set()))
+    errors, checked = [], {}
+    reader = ObjectBatch()
+    root = repo_root()
+    try:
+        for commit in sorted(commits):
+            commit_exceptions = allowlist(root, commit, reader)
+            raw_commit = reader.read(commit)
+            if raw_commit is None:
+                raise ValueError('待推送提交对象缺失')
+            header, _, body = raw_commit.partition(b'\n\n')
+            errors.extend(commit[:12] + ': ' + error for error in message_problems(body.decode('utf-8', 'replace')))
+            parents = [line[7:].decode('ascii') for line in header.splitlines() if line.startswith(b'parent ')]
+            args = ['diff-tree', '--root', '--no-commit-id', '-r', '--raw', '--no-renames', '--diff-filter=ACMRT', '-z']
+            args += [parents[0], commit] if parents else [commit]
+            entries = git(*args).split(b'\0')
+            for index in range(0, len(entries) - 1, 2):
+                fields = entries[index].split()
+                if len(fields) != 5 or not fields[0].startswith(b':'):
+                    raise ValueError('Git 文件差异返回无效结果')
+                _, mode, _, oid, _ = fields
+                path = os.fsdecode(entries[index + 1])
+                if mode in (b'120000', b'160000'):
+                    continue
+                # 缓存包含本提交对该路径的精确例外，撤销例外后必须重新检查。
+                key = (path, oid, json.dumps(commit_exceptions.get(path), sort_keys=True))
+                if key not in checked:
+                    checked[key] = scan_blob(path, oid.decode('ascii'), commit_exceptions, set(), reader)
+                    errors.extend(checked[key])
+    finally:
+        reader.close()
     return errors
 
 
