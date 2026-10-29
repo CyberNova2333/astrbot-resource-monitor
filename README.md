@@ -1,5 +1,7 @@
 # AstrBot Resource Monitor 📡
 
+[English](README.en.md) · [中文源码指南](repo-docs/README.md)
+
 > **按客户端内容校验规则检测资源线路，并通过 AstrBot 发送故障与恢复通知。**
 
 检查配置、清单、Range、块 MD5、热更包和证书等信息，识别“HTTP 200 但内容不可用”的故障。插件只负责观察与通知，不自动改配置或切换线路。
@@ -130,7 +132,6 @@ python3 -m compileall -q watch main.py
 
 未安装运行依赖时，连接器相关测试会明确跳过；安装 `requirements.txt` 后可运行完整测试。CI 单独安装依赖执行连接层回归，响应与连接仍使用离线替身。地址守卫同时检查工作区与待推送提交的实际内容，避免“先加入再删除”把地址留进历史。
 
-
 <a id="section-5"></a>
 
 ## ⚙️ 配置来源与通知边界
@@ -150,3 +151,21 @@ python3 -m compileall -q watch main.py
 ## 📜 许可
 
 代码采用 [GPLv3](LICENSE)。真实线路、会话 ID 与凭据不随源码或示例分发。
+
+<!-- repo-docs routing -->
+
+## 源码指南与文档站
+
+监控资源线路时，先按当前线上配置检查内容与摘要，再将确认的故障和恢复放入持久化通知队列。QQ 官方适配器的提交回执只表示尝试提交，通知要由查看者明确确认。
+
+从[阅读路径](repo-docs/README.md)进入[一条真实主流程](repo-docs/walkthroughs/one-real-run.md)，再用[代码地图](repo-docs/code-map.md)定位改动。证据与未覆盖边界见[源码调查记录](repo-docs/references/source-evidence.md)。
+
+## 文档站
+
+文档站采用 VitePress 默认主题，依赖与业务项目分开安装。默认输出 `docs-site/.vitepress/dist/`；独立核验可在构建命令后加 `-- --outDir <仓库外绝对目录>`。指南正文只维护 `repo-docs/`，站点通过 include 读取；网页中的仓库源码链接显示为精确文件路径，不复制源码或本机资源。
+
+```sh
+npm --prefix docs-site ci
+npm --prefix docs-site run docs:dev -- --host 127.0.0.1
+npm --prefix docs-site run docs:build
+```
