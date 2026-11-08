@@ -116,7 +116,7 @@ export function setupDocsMotion(router: Router, anime: AnimeModule) {
           ],
           opacity: [0.82, 1],
           duration: (_element: HTMLElement, index: number) =>
-            4600 + index * 1000,
+            6200 + index * 1400,
           ease: 'inOutSine',
           loop: true,
           alternate: true,
@@ -133,48 +133,43 @@ export function setupDocsMotion(router: Router, anime: AnimeModule) {
 
       const nav = query('.VPNavBar');
       const band = query('.adv-docs-deco__band');
-      const title = query('.vp-doc h1');
-      const blocks = query('.vp-doc .content-container > *').slice(0, 12);
       const hero = query('.VPHero .main > *').slice(0, 8);
-      const entranceTargets = [...nav, ...band, ...title, ...blocks, ...hero];
+      const isHome = hero.length > 0;
+
+      // 仅在官网首页或明确入场目标存在时执行入场时间线
+      // 关键修复：入场元素在时间线启动时立即设为初始透明状态，避免“字在开始前已到位再抽搐”的闪烁
+      const entranceTargets = isHome
+        ? [...nav, ...band, ...hero]
+        : [...nav, ...band];
+      for (const el of entranceTargets) {
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(10px)';
+      }
+
       entrance = createTimeline({
-        defaults: { ease: 'outQuart', duration: 300 },
+        defaults: { ease: 'outCubic', duration: 750 },
         onComplete: () => {
           for (const element of entranceTargets) clearInline(element);
         },
       });
-      if (nav.length) entrance.add(nav, { opacity: [0, 1], y: [-10, 0] }, 0);
+
+      if (nav.length)
+        entrance.add(nav, { opacity: [0, 1], y: [-8, 0], duration: 650 }, 0);
       if (band.length)
         entrance.add(
           band,
-          { scaleX: [0, 1], duration: 700, ease: 'outQuint' },
-          60
+          { scaleX: [0, 1], duration: 900, ease: 'outCubic' },
+          50
         );
-      if (title.length) {
+      if (hero.length) {
         entrance.add(
-          title,
-          {
-            opacity: [0, 1],
-            y: [10, 0],
-            clipPath: ['inset(0 100% 0 0)', 'inset(0 0% 0 0)'],
-            duration: 460,
-          },
+          hero,
+          { opacity: [0, 1], y: [12, 0], delay: stagger(90), duration: 750 },
           100
         );
       }
-      if (hero.length)
-        entrance.add(
-          hero,
-          { opacity: [0, 1], y: [14, 0], delay: stagger(48) },
-          '<+=100'
-        );
-      if (blocks.length)
-        entrance.add(
-          blocks,
-          { opacity: [0, 1], y: [12, 0], delay: stagger(48) },
-          title.length ? '<+=180' : 140
-        );
 
+      // 文档正文部分：仅对首屏视口下方（未入屏）的区块在滚动进入时平滑淡入，绝不二次重复触发已渲染元素
       const selector = [
         '.vp-doc h2',
         '.vp-doc h3',
@@ -184,9 +179,15 @@ export function setupDocsMotion(router: Router, anime: AnimeModule) {
         '.vp-doc blockquote',
         '.VPFeature',
       ].join(', ');
-      const elements = query(selector).filter(
-        (element) => element.closest('.VPSidebar') === null
-      );
+
+      const viewHeight = window.innerHeight || 800;
+      const elements = query(selector).filter((element) => {
+        if (element.closest('.VPSidebar') !== null) return false;
+        // 如果元素已经在视口首屏内，直接保持静止可见，绝不后置触发动画导致抽搐
+        const rect = element.getBoundingClientRect();
+        return rect.top >= viewHeight * 0.9;
+      });
+
       if (elements.length) {
         observer = new IntersectionObserver(
           (entries) => {
@@ -196,11 +197,14 @@ export function setupDocsMotion(router: Router, anime: AnimeModule) {
               observer?.unobserve(element);
               if (element.matches('.vp-doc h2'))
                 element.classList.add('adv-docs-bar-in');
+              // 初始设为 0 并平滑升起，时长放缓至 700ms
+              element.style.opacity = '0';
+              element.style.transform = 'translateY(12px)';
               const animation = animate(element, {
                 opacity: [0, 1],
-                y: [16, 0],
-                duration: 320,
-                ease: 'outQuart',
+                y: [12, 0],
+                duration: 700,
+                ease: 'outCubic',
                 onComplete: () => {
                   clearInline(element);
                   reveals.delete(animation);
@@ -209,12 +213,13 @@ export function setupDocsMotion(router: Router, anime: AnimeModule) {
               reveals.add(animation);
             }
           },
-          { threshold: 0.12, rootMargin: '0px 0px -6% 0px' }
+          { threshold: 0.1, rootMargin: '0px 0px -40px 0px' }
         );
         for (const element of elements) observer.observe(element);
       }
+
       for (const heading of query('.vp-doc h2')) {
-        if (heading.getBoundingClientRect().top < window.innerHeight)
+        if (heading.getBoundingClientRect().top < viewHeight)
           heading.classList.add('adv-docs-bar-in');
       }
     });
