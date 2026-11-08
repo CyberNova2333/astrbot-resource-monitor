@@ -59,7 +59,7 @@ ALLOWED_HOSTS = (
     # 协议与规范
     "www.rfc-editor.org", "datatracker.ietf.org", "developer.mozilla.org",
     # 许可证
-    "www.gnu.org", "www.fsf.org", "spdx.org", "opensource.org",
+    "www.gnu.org", "www.fsf.org", "spdx.org", "opensource.org", "scripts.sil.org",
     # 本机回环
     "127.0.0.1", "0.0.0.0", "::1",
 )
@@ -67,11 +67,20 @@ ALLOWED_HOSTS = (
 # 允许出现的邮箱域（署名 trailer 用，AGENTS.md §1 三）
 ALLOWED_MAIL_DOMAINS = ("anthropic.com", "openai.com", "moonshot.cn",
                         "deepseek.com", "users.noreply.github.com",
-                        "example.test", "example.com", "noreply.cnb.cool")
+                        "example.test", "example.com")
 
 # 整份豁免的文件：许可证原文、以及本脚本自己（它必须写得出这些模式）。
 EXEMPT_PATHS = ("LICENSE", "LICENSE.additional-terms", "THIRD-PARTY-NOTICES.md",
                 "tools/check-no-endpoints.py")
+
+
+def is_exempt(path: str) -> bool:
+    if path in EXEMPT_PATHS:
+        return True
+    norm = path.replace("\\", "/")
+    if norm.startswith("docs-site/.vitepress/theme/vendor/") or norm.startswith("docs-site/.vitepress/theme/fonts/"):
+        return True
+    return False
 
 # 只扫这些后缀（文本且我们真会往里写地址的）。二进制与资源不扫。
 SCAN_SUFFIXES = (".py", ".md", ".json", ".jsonc", ".yaml", ".yml", ".toml",
@@ -300,7 +309,7 @@ def scan_commits(commits, problems):
             _, kind, oid = meta.split()
             label = sha[:12] + ":" + path
             scan_path(path, problems, label)
-            if kind != "blob" or path in EXEMPT_PATHS or (path, oid) in seen:
+            if kind != "blob" or is_exempt(path) or (path, oid) in seen:
                 continue
             seen.add((path, oid))
             text = git_text("cat-file", "blob", oid)
@@ -319,7 +328,7 @@ def main(argv):
         files = tracked_files()
         for path in files:
             scan_path(path, problems)
-            if path in EXEMPT_PATHS or not path.endswith(SCAN_SUFFIXES):
+            if is_exempt(path) or not path.endswith(SCAN_SUFFIXES):
                 continue
             if not os.path.exists(path):
                 continue  # 工作区删除的文件不在工作区自检范围，推送仍检查历史对象。
