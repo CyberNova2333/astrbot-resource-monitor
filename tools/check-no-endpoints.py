@@ -51,7 +51,7 @@ ALLOWED_HOSTS = (
     "example.test", "example.com", "example.org", "example.net",
     "invalid", "localhost",
     # 第三方：框架与生态的文档/源码/包索引
-    "astrbot.app", "docs.astrbot.app", "github.com", "raw.githubusercontent.com",
+    "astrbot.app", "docs.astrbot.app", "github.com", "github.io", "raw.githubusercontent.com",
     "pypi.org", "files.pythonhosted.org", "python.org", "docs.python.org",
     "www.python.org",
     # 文档构建的公开包索引与锁文件中的上游资助元数据，不是探测目标。
@@ -66,7 +66,7 @@ ALLOWED_HOSTS = (
 
 # 允许出现的邮箱域（署名 trailer 用，AGENTS.md §1 三）
 ALLOWED_MAIL_DOMAINS = ("anthropic.com", "openai.com", "moonshot.cn",
-                        "deepseek.com", "users.noreply.github.com",
+                        "deepseek.com", "google.com", "users.noreply.github.com",
                         "example.test", "example.com")
 
 # 整份豁免的文件：许可证原文、以及本脚本自己（它必须写得出这些模式）。

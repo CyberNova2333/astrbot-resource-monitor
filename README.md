@@ -16,6 +16,9 @@
 
 <a id="section-1"></a>
 
+
+> 📐 **交互式架构图表**：支持动态探查、缩放平移与主题切换的高保真架构图：[监控插件与安全守卫拓扑图](https://cybernova2333.github.io/astrbot-resource-monitor/diagrams/monitor-architecture.html)。
+
 ## 🏛️ 分层代码架构
 
 AstrBot 依赖集中在 `main.py`。`Monitor` 组织一轮检查，来源适配和探针通过 `HttpClient` 获取数据，调度与告警状态单独维护；判据和状态模块无需导入机器人框架。
