@@ -32,6 +32,21 @@ features:
 
 在分布式资源获取与媒体解析场景下，外部下载源可能遭遇劫持、下线或重定向篡改。本插件在资源被传递给主进程前，执行严格的内容合规校验、哈希指纹匹配以及链路状态监控，保障服务运行环境绝对安全可控。
 
+
+## 架构全景
+
+<div class="archify-diagram-card" style="margin: 1.5rem 0; border: 1px solid var(--vp-c-border); border-radius: 12px; overflow: hidden; background: var(--vp-c-bg-soft); box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 18px; background: var(--vp-c-bg-elv); border-bottom: 1px solid var(--vp-c-border); font-size: 13px;">
+    <span style="font-weight: 600; color: var(--vp-c-text-1); display: flex; align-items: center; gap: 8px;">
+      <span style="font-size: 16px;">📐</span> 监控插件与安全守卫拓扑（交互式架构图表，支持平移 / 缩放 / 探查）
+    </span>
+    <a href="/diagrams/monitor-architecture.html" target="_blank" rel="noreferrer" style="font-size: 12px; color: var(--vp-c-brand-1); text-decoration: none; font-weight: 500;">
+      在新窗口全屏打开 ↗
+    </a>
+  </div>
+  <iframe src="/diagrams/monitor-architecture.html" width="100%" height="520px" frameborder="0" style="display: block; border: none;" allowfullscreen loading="lazy"></iframe>
+</div>
+
 ## 怎么用 / 快速上手
 
 ### 1. 插件集成与环境检查
