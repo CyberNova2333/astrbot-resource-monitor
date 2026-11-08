@@ -184,8 +184,8 @@ export function setupDocsMotion(router: Router, anime: AnimeModule) {
       const elements = query(selector).filter((element) => {
         if (element.closest('.VPSidebar') !== null) return false;
         // 如果元素已经在视口首屏内，直接保持静止可见，绝不后置触发动画导致抽搐
-        const rect = element.getBoundingClientRect();
-        return rect.top >= viewHeight * 0.9;
+        const { top } = element.getBoundingClientRect();
+        return top >= viewHeight * 0.9;
       });
 
       if (elements.length) {
@@ -219,8 +219,8 @@ export function setupDocsMotion(router: Router, anime: AnimeModule) {
       }
 
       for (const heading of query('.vp-doc h2')) {
-        if (heading.getBoundingClientRect().top < viewHeight)
-          heading.classList.add('adv-docs-bar-in');
+        const { top: headingTop } = heading.getBoundingClientRect();
+        if (headingTop < viewHeight) heading.classList.add('adv-docs-bar-in');
       }
     });
   }
