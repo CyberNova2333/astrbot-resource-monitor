@@ -102,7 +102,7 @@ class EndpointSyntaxTests(unittest.TestCase):
             with self.subTest(host=host):
                 self.assertTrue(ENDPOINTS.host_allowed(host))
                 self.assertFalse(ENDPOINTS.host_allowed(host + '.untrusted' + '.org'))
-        self.assertIn('noreply.cnb.cool', ENDPOINTS.ALLOWED_MAIL_DOMAINS)
+        self.assertIn('users.noreply.github.com', ENDPOINTS.ALLOWED_MAIL_DOMAINS)
 
     def test_malformed_reserved_urls_remain_safe_parser_fixtures(self):
         for url in ('https://[broken.example.test/', 'https://[broken.invalid/'):
