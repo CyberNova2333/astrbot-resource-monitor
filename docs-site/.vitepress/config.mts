@@ -17,7 +17,12 @@ export default {
   markdown: { config: guideLinks(pages) },
   themeConfig: {
     siteTitle: "资源监控",
-    nav: [{ text: '阅读路径', link: '/' }],
+    nav: [
+      { text: '官网首页', link: '/' },
+      { text: '文档指南', link: '/walkthroughs/one-real-run' },
+      { text: '代码地图', link: '/code-map' },
+      { text: 'GitHub', link: 'https://github.com/CyberNova2333/astrbot-resource-monitor' },
+    ],
     sidebar: [{ text: '源码指南', items: [
   {
     "text": "阅读路径",
