@@ -959,11 +959,11 @@ html.serious-mode:not(.dark) .VPNavBarSearch .DocSearch-Button-Key {
   ) !important;
 }
 
-/* 搜索输入栏：四边完整边框，高度紧凑对称，垂直严格居中 */
+/* 搜索输入栏：四边完整边框，高度匀称舒展，垂直严格居中 */
 .VPLocalSearchBox .search-bar {
   display: flex !important;
   align-items: center !important;
-  padding: 3px 10px !important;
+  padding: 8px 14px !important;
   border: 1px solid rgba(255, 255, 255, 0.12) !important;
   border-radius: 8px !important;
   background: rgba(255, 255, 255, 0.03) !important;
@@ -992,15 +992,15 @@ html.serious-mode:not(.dark) .VPNavBarSearch .DocSearch-Button-Key {
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  height: 26px !important;
-  width: 26px !important;
+  height: 32px !important;
+  width: 32px !important;
   margin: 0 !important;
   padding: 0 !important;
   flex-shrink: 0 !important;
 }
 
 .VPLocalSearchBox .search-bar .search-icon {
-  font-size: 16px !important;
+  font-size: 18px !important;
   color: var(--vp-c-brand-1) !important;
 }
 
@@ -1011,13 +1011,13 @@ html.serious-mode:not(.dark) .VPNavBarSearch .DocSearch-Button-Key {
   border: none !important;
   outline: none !important;
   box-shadow: none !important;
-  font-size: 13.5px !important;
-  line-height: 26px !important;
+  font-size: 15px !important;
+  line-height: 32px !important;
   font-family: var(--vp-font-family-base) !important;
   color: var(--vp-c-text-1) !important;
-  padding: 0 8px !important;
+  padding: 0 10px !important;
   margin: 0 !important;
-  height: 26px !important;
+  height: 32px !important;
 }
 .VPLocalSearchBox .search-input::placeholder {
   color: var(--vp-c-text-3) !important;
@@ -1034,8 +1034,8 @@ html.serious-mode:not(.dark) .VPNavBarSearch .DocSearch-Button-Key {
 .VPLocalSearchBox .search-bar > .search-actions:not(.before) {
   display: flex !important;
   align-items: center !important;
-  gap: 2px !important;
-  height: 26px !important;
+  gap: 4px !important;
+  height: 32px !important;
   margin: 0 !important;
   padding: 0 !important;
   flex-shrink: 0 !important;
@@ -1047,14 +1047,14 @@ html.serious-mode:not(.dark) .VPNavBarSearch .DocSearch-Button-Key {
 }
 
 .VPLocalSearchBox .search-bar .search-actions button {
-  height: 26px !important;
-  width: 26px !important;
+  height: 30px !important;
+  width: 30px !important;
   padding: 0 !important;
   margin: 0 !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  border-radius: 4px !important;
+  border-radius: 6px !important;
   color: var(--vp-c-text-2) !important;
   background: transparent !important;
   border: none !important;
@@ -1068,45 +1068,45 @@ html.serious-mode:not(.dark) .VPNavBarSearch .DocSearch-Button-Key {
   background: rgba(0, 0, 0, 0.06) !important;
 }
 
-/* 搜索结果列表与卡片：紧凑高度 */
+/* 搜索结果列表与卡片：舒适高度与呼吸感 */
 .VPLocalSearchBox .results {
-  padding: 4px 6px !important;
-  max-height: 420px !important;
+  padding: 8px 10px !important;
+  max-height: 480px !important;
 }
 
-/* 搜索结果卡片：紧凑内边距与外间距，四边对称 */
+/* 搜索结果卡片：内边距适中，四边对称，舒适可读 */
 .VPLocalSearchBox .results .result {
   border: 1px solid transparent !important;
-  border-radius: 6px !important;
-  padding: 4px 10px !important;
-  margin: 2px 0 !important;
+  border-radius: 8px !important;
+  padding: 8px 14px !important;
+  margin: 3px 0 !important;
   background: transparent !important;
   box-shadow: none !important;
-  transition: all 0.15s ease !important;
+  transition: all 0.18s ease !important;
 }
 
 .VPLocalSearchBox .results .result > div {
-  margin: 0 !important;
+  margin: 1px 0 !important;
 }
 
 .VPLocalSearchBox .results .result .titles {
-  padding: 0 !important;
+  padding: 2px 0 !important;
 }
 
 .VPLocalSearchBox .results .result .titles .title.main {
-  font-size: 13px !important;
-  line-height: 18px !important;
+  font-size: 14px !important;
+  line-height: 22px !important;
   font-weight: 500 !important;
   color: var(--vp-c-text-1) !important;
 }
 
 .VPLocalSearchBox .results .result .excerpt-wrapper {
-  margin-top: 2px !important;
+  margin-top: 4px !important;
 }
 
 .VPLocalSearchBox .results .result .excerpt {
-  font-size: 11.5px !important;
-  line-height: 16px !important;
+  font-size: 12.5px !important;
+  line-height: 19px !important;
 }
 
 .VPLocalSearchBox .results .result .title-icon {
@@ -1213,7 +1213,7 @@ html.serious-mode .VPLocalSearchBox .shell::before {
 html.serious-mode .VPLocalSearchBox .search-bar {
   display: flex !important;
   align-items: center !important;
-  padding: 3px 10px !important;
+  padding: 8px 14px !important;
   border: 1px solid #27272a !important;
   border-radius: 6px !important;
   background: #141416 !important;
@@ -1232,14 +1232,14 @@ html.serious-mode .VPLocalSearchBox .search-bar label {
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
-  height: 26px !important;
-  width: 26px !important;
+  height: 32px !important;
+  width: 32px !important;
   margin: 0 !important;
   padding: 0 !important;
   flex-shrink: 0 !important;
 }
 html.serious-mode .VPLocalSearchBox .search-bar .search-icon {
-  font-size: 16px !important;
+  font-size: 18px !important;
   color: #a1a1aa !important;
 }
 html.serious-mode .VPLocalSearchBox .search-input {
@@ -1250,11 +1250,11 @@ html.serious-mode .VPLocalSearchBox .search-input {
   outline: none !important;
   box-shadow: none !important;
   color: var(--vp-c-text-1) !important;
-  font-size: 13.5px !important;
-  line-height: 26px !important;
-  padding: 0 6px !important;
+  font-size: 15px !important;
+  line-height: 32px !important;
+  padding: 0 10px !important;
   margin: 0 !important;
-  height: 26px !important;
+  height: 32px !important;
 }
 html.serious-mode .VPLocalSearchBox .search-input::-webkit-search-cancel-button,
 html.serious-mode .VPLocalSearchBox .search-input::-webkit-search-decoration,
@@ -1271,8 +1271,8 @@ html.serious-mode
 html.serious-mode .VPLocalSearchBox .search-bar > .search-actions:not(.before) {
   display: flex !important;
   align-items: center !important;
-  gap: 2px !important;
-  height: 26px !important;
+  gap: 4px !important;
+  height: 32px !important;
   margin: 0 !important;
   padding: 0 !important;
   flex-shrink: 0 !important;
@@ -1283,14 +1283,14 @@ html.serious-mode .VPLocalSearchBox .search-bar > .search-actions:not(.before) {
   }
 }
 html.serious-mode .VPLocalSearchBox .search-bar .search-actions button {
-  height: 26px !important;
-  width: 26px !important;
+  height: 30px !important;
+  width: 30px !important;
   padding: 0 !important;
   margin: 0 !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  border-radius: 4px !important;
+  border-radius: 6px !important;
   color: #a1a1aa !important;
   background: transparent !important;
   border: none !important;
@@ -1308,34 +1308,34 @@ html.serious-mode:not(.dark)
   background: #e4e4e7 !important;
 }
 html.serious-mode .VPLocalSearchBox .results {
-  padding: 4px 6px !important;
-  max-height: 420px !important;
+  padding: 8px 10px !important;
+  max-height: 480px !important;
 }
 html.serious-mode .VPLocalSearchBox .results .result {
   border: 1px solid transparent !important;
   border-radius: 6px !important;
-  padding: 4px 10px !important;
-  margin: 2px 0 !important;
+  padding: 8px 14px !important;
+  margin: 3px 0 !important;
   background: transparent !important;
   box-shadow: none !important;
 }
 html.serious-mode .VPLocalSearchBox .results .result > div {
-  margin: 0 !important;
+  margin: 1px 0 !important;
 }
 html.serious-mode .VPLocalSearchBox .results .result .titles {
-  padding: 0 !important;
+  padding: 2px 0 !important;
 }
 html.serious-mode .VPLocalSearchBox .results .result .titles .title.main {
-  font-size: 13px !important;
-  line-height: 18px !important;
+  font-size: 14px !important;
+  line-height: 22px !important;
   font-weight: 500 !important;
 }
 html.serious-mode .VPLocalSearchBox .results .result .excerpt-wrapper {
-  margin-top: 2px !important;
+  margin-top: 4px !important;
 }
 html.serious-mode .VPLocalSearchBox .results .result .excerpt {
-  font-size: 11.5px !important;
-  line-height: 16px !important;
+  font-size: 12.5px !important;
+  line-height: 19px !important;
 }
 html.serious-mode .VPLocalSearchBox .results .result:hover,
 html.serious-mode .VPLocalSearchBox .results .result.selected {
