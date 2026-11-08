@@ -78,7 +78,11 @@ def is_exempt(path: str) -> bool:
     if path in EXEMPT_PATHS:
         return True
     norm = path.replace("\\", "/")
-    if norm.startswith("docs-site/.vitepress/theme/vendor/") or norm.startswith("docs-site/.vitepress/theme/fonts/"):
+    if (
+        norm.startswith("docs-site/.vitepress/theme/vendor/")
+        or norm.startswith("docs-site/.vitepress/theme/fonts/")
+        or norm.startswith("docs-site/public/diagrams/")
+    ):
         return True
     return False
 
