@@ -647,6 +647,41 @@ html:not(.motion-on) .vp-doc h2::after {
 .VPHero .text {
   color: var(--adv-docs-text-2);
 }
+
+/* 官网首页 Hero 与 Features 浮现入场动画：首帧平滑渲染，放慢速率，杜绝抽搐 */
+@keyframes cbnv-float-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+html:not(.serious-mode) .VPHero .main h1.heading,
+html:not(.serious-mode) .VPHero .main .name {
+  animation: cbnv-float-rise 1.1s cubic-bezier(0.16, 1, 0.3, 1) 0.05s both;
+}
+html:not(.serious-mode) .VPHero .main p.tagline,
+html:not(.serious-mode) .VPHero .main .text {
+  animation: cbnv-float-rise 1.1s cubic-bezier(0.16, 1, 0.3, 1) 0.18s both;
+}
+html:not(.serious-mode) .VPHero .main .actions,
+html:not(.serious-mode) .VPHero .main .action {
+  animation: cbnv-float-rise 1.1s cubic-bezier(0.16, 1, 0.3, 1) 0.32s both;
+}
+html:not(.serious-mode) .VPFeatures .VPFeature {
+  animation: cbnv-float-rise 1.1s cubic-bezier(0.16, 1, 0.3, 1) 0.45s both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not(.serious-mode) .VPHero .main *,
+  html:not(.serious-mode) .VPFeatures .VPFeature {
+    animation: none !important;
+  }
+}
 .VPFeatures .VPFeature {
   background: var(--adv-docs-surface);
   border: 1px solid var(--adv-docs-line);
@@ -917,11 +952,11 @@ html.serious-mode:not(.dark) .VPNavBarSearch .DocSearch-Button-Key {
   ) !important;
 }
 
-/* 搜索输入栏：无缝嵌入，去除内嵌突兀小框 */
+/* 搜索输入栏：无缝嵌入，紧凑高度 */
 .VPLocalSearchBox .search-bar {
   display: flex !important;
   align-items: center !important;
-  padding: 12px 16px !important;
+  padding: 7px 14px !important;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
   background: rgba(255, 255, 255, 0.02) !important;
 }
@@ -939,36 +974,56 @@ html.serious-mode:not(.dark) .VPNavBarSearch .DocSearch-Button-Key {
   border: none !important;
   outline: none !important;
   box-shadow: none !important;
-  font-size: 15px !important;
+  font-size: 14px !important;
+  line-height: 20px !important;
   font-family: var(--vp-font-family-base) !important;
   color: var(--vp-c-text-1) !important;
-  padding: 4px 8px !important;
+  padding: 2px 6px !important;
+  height: 26px !important;
 }
 .VPLocalSearchBox .search-input::placeholder {
   color: var(--vp-c-text-3) !important;
 }
 
-/* 搜索结果列表 */
+/* 搜索结果列表与卡片：紧凑高度 */
 .VPLocalSearchBox .results {
-  padding: 10px 12px !important;
-  max-height: 460px !important;
+  padding: 6px 8px !important;
+  max-height: 440px !important;
 }
 
-/* 去除 VitePress 原生笨重的 2px 粗边框 */
+/* 去除 VitePress 原生笨重的粗边框，减少内边距与外间距 */
 .VPLocalSearchBox .results .result {
   border: 1px solid transparent !important;
-  border-radius: 8px !important;
-  padding: 9px 14px !important;
-  margin: 3px 0 !important;
+  border-radius: 6px !important;
+  padding: 5px 12px !important;
+  margin: 2px 0 !important;
   background: transparent !important;
   box-shadow: none !important;
   transition: all 0.16s ease !important;
 }
 
+.VPLocalSearchBox .results .result > div {
+  margin: 1px 0 !important;
+}
+
+.VPLocalSearchBox .results .result .titles {
+  padding: 1px 0 !important;
+}
+
 .VPLocalSearchBox .results .result .titles .title.main {
-  font-size: 14px !important;
+  font-size: 13.5px !important;
+  line-height: 20px !important;
   font-weight: 500 !important;
   color: var(--vp-c-text-1) !important;
+}
+
+.VPLocalSearchBox .results .result .excerpt-wrapper {
+  margin-top: 2px !important;
+}
+
+.VPLocalSearchBox .results .result .excerpt {
+  font-size: 12px !important;
+  line-height: 17px !important;
 }
 
 .VPLocalSearchBox .results .result .title-icon {
@@ -1073,7 +1128,7 @@ html.serious-mode .VPLocalSearchBox .shell::before {
   display: none !important;
 }
 html.serious-mode .VPLocalSearchBox .search-bar {
-  padding: 12px 16px !important;
+  padding: 7px 14px !important;
   border-bottom: 1px solid #27272a !important;
   background: transparent !important;
 }
@@ -1086,17 +1141,24 @@ html.serious-mode .VPLocalSearchBox .search-bar .search-icon {
 html.serious-mode .VPLocalSearchBox .search-input {
   background: transparent !important;
   color: var(--vp-c-text-1) !important;
+  font-size: 14px !important;
+  line-height: 20px !important;
+  padding: 2px 6px !important;
+  height: 26px !important;
 }
 html.serious-mode .VPLocalSearchBox .results {
-  padding: 8px !important;
+  padding: 6px 8px !important;
 }
 html.serious-mode .VPLocalSearchBox .results .result {
   border: 1px solid transparent !important;
   border-radius: 6px !important;
-  padding: 8px 12px !important;
+  padding: 5px 12px !important;
   margin: 2px 0 !important;
   background: transparent !important;
   box-shadow: none !important;
+}
+html.serious-mode .VPLocalSearchBox .results .result > div {
+  margin: 1px 0 !important;
 }
 html.serious-mode .VPLocalSearchBox .results .result:hover,
 html.serious-mode .VPLocalSearchBox .results .result.selected {
