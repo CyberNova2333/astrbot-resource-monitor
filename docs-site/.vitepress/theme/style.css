@@ -751,92 +751,401 @@ summary:focus-visible {
   opacity: 0.45;
 }
 
-/* ---------- 3. 顶部搜索框：桌面端与左侧导航等宽 ---------- */
+/* ---------- 3. 顶部导航搜索框：与整体主题深度一致 ---------- */
 .VPNavBarSearch {
+  display: flex;
+  align-items: center;
   flex: 0 1 auto;
+  padding-left: 12px;
 }
-@media (min-width: 768px) {
-  .VPNavBarSearch .DocSearch-Button,
-  .VPNavBarSearch .DocSearch-Button:hover {
-    width: var(--vp-sidebar-width, 272px);
-    max-width: 100%;
-    justify-content: flex-start;
-    border-radius: 4px;
-  }
+.VPNavBarSearch .DocSearch-Button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  width: 220px;
+  max-width: 100%;
+  margin: 0;
+  padding: 0 10px 0 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  color: var(--vp-c-text-2);
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
-
-/* ---------- 4. 搜索面板：与全站质感统一 ---------- */
-.VPLocalSearchBox .backdrop {
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+:root:not(.dark) .VPNavBarSearch .DocSearch-Button {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
-.VPLocalSearchBox .shell {
-  background: var(--vp-c-bg-elv);
-  border: 1px solid var(--vp-c-divider);
-  border-radius: var(--vp-border-radius);
-  box-shadow: var(--vp-shadow-3);
-  overflow: hidden;
+.VPNavBarSearch .DocSearch-Button:hover {
+  background: rgba(56, 189, 248, 0.08);
+  border-color: var(--vp-c-brand-1);
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.16);
+  color: var(--vp-c-text-1);
 }
-.VPLocalSearchBox .shell::before {
-  content: '';
-  display: block;
-  height: 3px;
-  background: linear-gradient(
-    90deg,
-    var(--vp-c-brand-1),
-    var(--vp-c-brand-2) 55%,
-    transparent
-  );
+:root:not(.dark) .VPNavBarSearch .DocSearch-Button:hover {
+  background: rgba(12, 92, 171, 0.06);
+  border-color: var(--vp-c-brand-1);
+  box-shadow: 0 0 10px rgba(12, 92, 171, 0.12);
 }
-.VPLocalSearchBox .search-bar {
-  border-bottom: 1px solid var(--vp-c-divider);
+.VPNavBarSearch .DocSearch-Button-Container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.VPLocalSearchBox .search-input {
-  background: var(--vp-c-bg-soft);
-  border-radius: 4px;
+.VPNavBarSearch .DocSearch-Search-Icon {
+  width: 15px;
+  height: 15px;
+  color: var(--vp-c-brand-1);
+  transition: color 0.2s ease;
+}
+.VPNavBarSearch .DocSearch-Button-Placeholder {
+  font-size: 13px;
+  color: var(--vp-c-text-2);
   font-family: var(--vp-font-family-base);
 }
-.VPLocalSearchBox .search-input::placeholder {
-  color: var(--vp-c-text-3);
+.VPNavBarSearch .DocSearch-Button-Keys {
+  display: flex;
+  align-items: center;
+  gap: 3px;
 }
-.VPLocalSearchBox .results .result {
+.VPNavBarSearch .DocSearch-Button-Key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--vp-font-family-mono);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 4px;
-  padding: 8px 12px;
-}
-.VPLocalSearchBox .results .result.selected {
-  background: var(--vp-c-brand-soft);
-  box-shadow: inset 3px 0 0 var(--vp-c-brand-1);
-}
-.VPLocalSearchBox mark {
-  background: var(--vp-c-brand-soft);
-  color: var(--vp-c-brand-1);
-  border-radius: 2px;
-  padding: 0 2px;
-}
-.VPLocalSearchBox .search-keyboard-shortcuts {
-  border-top: 1px solid var(--vp-c-divider);
-  background: var(--vp-c-bg-alt);
-  color: var(--vp-c-text-3);
-}
-.VPLocalSearchBox kbd {
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 4px;
-  background: var(--vp-c-bg-elv);
   color: var(--vp-c-text-2);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
 }
+:root:not(.dark) .VPNavBarSearch .DocSearch-Button-Key {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: rgba(0, 0, 0, 0.1);
+  color: var(--vp-c-text-2);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+/* 简约模式下的顶部搜索框 (Coolify 极简风格) */
+html.serious-mode .VPNavBarSearch .DocSearch-Button {
+  background: #18181b !important;
+  border: 1px solid #27272a !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+html.serious-mode:not(.dark) .VPNavBarSearch .DocSearch-Button {
+  background: #f4f4f5 !important;
+  border: 1px solid #e4e4e7 !important;
+}
+html.serious-mode .VPNavBarSearch .DocSearch-Button:hover {
+  background: #27272a !important;
+  border-color: #3f3f46 !important;
+  box-shadow: none !important;
+}
+html.serious-mode:not(.dark) .VPNavBarSearch .DocSearch-Button:hover {
+  background: #e4e4e7 !important;
+  border-color: #d4d4d8 !important;
+}
+html.serious-mode .VPNavBarSearch .DocSearch-Search-Icon {
+  color: #a1a1aa !important;
+}
+html.serious-mode .VPNavBarSearch .DocSearch-Button-Key {
+  background: #27272a !important;
+  border: 1px solid #3f3f46 !important;
+  color: #a1a1aa !important;
+  box-shadow: none !important;
+}
+html.serious-mode:not(.dark) .VPNavBarSearch .DocSearch-Button-Key {
+  background: #ffffff !important;
+  border: 1px solid #e4e4e7 !important;
+  color: #71717a !important;
+}
+
+/* ---------- 4. 搜索弹窗面板：质感模式与简约模式全维定制 ---------- */
+.VPLocalSearchBox .backdrop {
+  background: rgba(5, 7, 12, 0.72) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+}
+:root:not(.dark) .VPLocalSearchBox .backdrop {
+  background: rgba(15, 23, 42, 0.45) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+}
+
+.VPLocalSearchBox .shell {
+  background: rgba(15, 23, 42, 0.94) !important;
+  backdrop-filter: blur(24px) !important;
+  -webkit-backdrop-filter: blur(24px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 14px !important;
+  box-shadow:
+    0 25px 60px -15px rgba(0, 0, 0, 0.75),
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    0 0 35px -10px rgba(56, 189, 248, 0.2) !important;
+  overflow: hidden !important;
+  animation: vp-search-shell-in 0.35s cubic-bezier(0.16, 1, 0.3, 1) both !important;
+}
+:root:not(.dark) .VPLocalSearchBox .shell {
+  background: rgba(255, 255, 255, 0.96) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  box-shadow:
+    0 20px 50px -12px rgba(12, 92, 171, 0.18),
+    0 0 0 1px rgba(0, 0, 0, 0.05) !important;
+}
+
+/* 顶部流光氛围条 */
+.VPLocalSearchBox .shell::before {
+  content: '' !important;
+  display: block !important;
+  height: 2px !important;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--vp-c-brand-1) 30%,
+    var(--vp-c-brand-2) 70%,
+    transparent
+  ) !important;
+}
+
+/* 搜索输入栏：无缝嵌入，去除内嵌突兀小框 */
+.VPLocalSearchBox .search-bar {
+  display: flex !important;
+  align-items: center !important;
+  padding: 12px 16px !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: rgba(255, 255, 255, 0.02) !important;
+}
+:root:not(.dark) .VPLocalSearchBox .search-bar {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.07) !important;
+  background: rgba(0, 0, 0, 0.01) !important;
+}
+
+.VPLocalSearchBox .search-bar .search-icon {
+  color: var(--vp-c-brand-1) !important;
+}
+
+.VPLocalSearchBox .search-input {
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  font-size: 15px !important;
+  font-family: var(--vp-font-family-base) !important;
+  color: var(--vp-c-text-1) !important;
+  padding: 4px 8px !important;
+}
+.VPLocalSearchBox .search-input::placeholder {
+  color: var(--vp-c-text-3) !important;
+}
+
+/* 搜索结果列表 */
+.VPLocalSearchBox .results {
+  padding: 10px 12px !important;
+  max-height: 460px !important;
+}
+
+/* 去除 VitePress 原生笨重的 2px 粗边框 */
+.VPLocalSearchBox .results .result {
+  border: 1px solid transparent !important;
+  border-radius: 8px !important;
+  padding: 9px 14px !important;
+  margin: 3px 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transition: all 0.16s ease !important;
+}
+
+.VPLocalSearchBox .results .result .titles .title.main {
+  font-size: 14px !important;
+  font-weight: 500 !important;
+  color: var(--vp-c-text-1) !important;
+}
+
+.VPLocalSearchBox .results .result .title-icon {
+  color: var(--vp-c-brand-1) !important;
+  opacity: 0.75 !important;
+}
+
+.VPLocalSearchBox .results .result:hover,
+.VPLocalSearchBox .results .result.selected {
+  background: rgba(56, 189, 248, 0.1) !important;
+  border-color: rgba(56, 189, 248, 0.28) !important;
+  box-shadow:
+    0 0 14px rgba(56, 189, 248, 0.12),
+    inset 3px 0 0 var(--vp-c-brand-1) !important;
+}
+:root:not(.dark) .VPLocalSearchBox .results .result:hover,
+:root:not(.dark) .VPLocalSearchBox .results .result.selected {
+  background: rgba(12, 92, 171, 0.08) !important;
+  border-color: rgba(12, 92, 171, 0.24) !important;
+  box-shadow:
+    0 0 10px rgba(12, 92, 171, 0.08),
+    inset 3px 0 0 var(--vp-c-brand-1) !important;
+}
+
+/* 匹配高亮标签 */
+.VPLocalSearchBox mark {
+  background: rgba(56, 189, 248, 0.22) !important;
+  color: var(--vp-c-brand-1) !important;
+  font-weight: 600 !important;
+  border-radius: 3px !important;
+  padding: 1px 4px !important;
+}
+:root:not(.dark) .VPLocalSearchBox mark {
+  background: rgba(12, 92, 171, 0.15) !important;
+  color: var(--vp-c-brand-1) !important;
+}
+
+/* 快捷键与底栏 */
+.VPLocalSearchBox .search-keyboard-shortcuts {
+  display: flex !important;
+  align-items: center !important;
+  gap: 16px !important;
+  padding: 10px 16px !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: rgba(0, 0, 0, 0.2) !important;
+  color: var(--vp-c-text-3) !important;
+  font-size: 12px !important;
+}
+:root:not(.dark) .VPLocalSearchBox .search-keyboard-shortcuts {
+  border-top: 1px solid rgba(0, 0, 0, 0.07) !important;
+  background: rgba(0, 0, 0, 0.02) !important;
+}
+
+.VPLocalSearchBox kbd {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-width: 20px !important;
+  height: 20px !important;
+  padding: 0 5px !important;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  font-family: var(--vp-font-family-mono) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 4px !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+  color: var(--vp-c-text-2) !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+}
+:root:not(.dark) .VPLocalSearchBox kbd {
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  background: rgba(0, 0, 0, 0.05) !important;
+  color: var(--vp-c-text-2) !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+}
+
+/* 简约模式下的搜索弹窗面板 (彻底克制，统一 Coolify 紫色微调与暗色卡片) */
+html.serious-mode .VPLocalSearchBox .backdrop {
+  background: rgba(0, 0, 0, 0.6) !important;
+  backdrop-filter: blur(4px) !important;
+  -webkit-backdrop-filter: blur(4px) !important;
+}
+html.serious-mode .VPLocalSearchBox .shell {
+  background: #09090b !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: 1px solid #27272a !important;
+  border-radius: 8px !important;
+  box-shadow:
+    0 20px 25px -5px rgba(0, 0, 0, 0.5),
+    0 8px 10px -6px rgba(0, 0, 0, 0.5) !important;
+  animation: none !important;
+}
+html.serious-mode:not(.dark) .VPLocalSearchBox .shell {
+  background: #ffffff !important;
+  border: 1px solid #e4e4e7 !important;
+  box-shadow:
+    0 20px 25px -5px rgba(0, 0, 0, 0.1),
+    0 8px 10px -6px rgba(0, 0, 0, 0.05) !important;
+}
+html.serious-mode .VPLocalSearchBox .shell::before {
+  display: none !important;
+}
+html.serious-mode .VPLocalSearchBox .search-bar {
+  padding: 12px 16px !important;
+  border-bottom: 1px solid #27272a !important;
+  background: transparent !important;
+}
+html.serious-mode:not(.dark) .VPLocalSearchBox .search-bar {
+  border-bottom: 1px solid #e4e4e7 !important;
+}
+html.serious-mode .VPLocalSearchBox .search-bar .search-icon {
+  color: #a1a1aa !important;
+}
+html.serious-mode .VPLocalSearchBox .search-input {
+  background: transparent !important;
+  color: var(--vp-c-text-1) !important;
+}
+html.serious-mode .VPLocalSearchBox .results {
+  padding: 8px !important;
+}
+html.serious-mode .VPLocalSearchBox .results .result {
+  border: 1px solid transparent !important;
+  border-radius: 6px !important;
+  padding: 8px 12px !important;
+  margin: 2px 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+html.serious-mode .VPLocalSearchBox .results .result:hover,
+html.serious-mode .VPLocalSearchBox .results .result.selected {
+  background: rgba(99, 102, 241, 0.12) !important;
+  border-color: rgba(99, 102, 241, 0.3) !important;
+  box-shadow: none !important;
+}
+html.serious-mode .VPLocalSearchBox .results .result .title-icon {
+  color: #818cf8 !important;
+}
+html.serious-mode .VPLocalSearchBox mark {
+  background: rgba(99, 102, 241, 0.22) !important;
+  color: #818cf8 !important;
+  font-weight: 600 !important;
+}
+html.serious-mode:not(.dark) .VPLocalSearchBox mark {
+  background: rgba(99, 102, 241, 0.15) !important;
+  color: #6366f1 !important;
+}
+html.serious-mode .VPLocalSearchBox .search-keyboard-shortcuts {
+  border-top: 1px solid #27272a !important;
+  background: #0d0d10 !important;
+  color: #71717a !important;
+}
+html.serious-mode:not(.dark) .VPLocalSearchBox .search-keyboard-shortcuts {
+  border-top: 1px solid #e4e4e7 !important;
+  background: #f9fafb !important;
+}
+html.serious-mode .VPLocalSearchBox kbd {
+  background: #18181b !important;
+  border: 1px solid #27272a !important;
+  color: #a1a1aa !important;
+  box-shadow: none !important;
+}
+html.serious-mode:not(.dark) .VPLocalSearchBox kbd {
+  background: #ffffff !important;
+  border: 1px solid #e4e4e7 !important;
+  color: #71717a !important;
+}
+
 @keyframes vp-search-shell-in {
   from {
     opacity: 0;
-    transform: translateY(-10px) scale(0.985);
+    transform: translateY(-8px) scale(0.985);
   }
   to {
     opacity: 1;
     transform: none;
   }
-}
-.VPLocalSearchBox .shell {
-  animation: vp-search-shell-in 0.28s cubic-bezier(0.215, 0.61, 0.355, 1) both;
 }
 @media (prefers-reduced-motion: reduce) {
   .VPLocalSearchBox .shell {
