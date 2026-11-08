@@ -1,0 +1,59 @@
+name: 文档站 GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs-site/**
+      - .github/workflows/docs-pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: docs-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: docs-site/pnpm-lock.yaml
+      - name: 安装文档依赖
+        run: pnpm --dir docs-site install --frozen-lockfile
+      - name: 构建文档站
+        run: pnpm --dir docs-site run docs:build
+      - uses: actions/configure-pages@v5
+      - name: 核对并补充 Pages 文件
+        run: |
+          set -eu
+          test -f docs-site/.vitepress/dist/index.html
+          touch docs-site/.vitepress/dist/.nojekyll
+          if [ -f docs-site/public/CNAME ]; then
+            cp docs-site/public/CNAME docs-site/.vitepress/dist/CNAME
+          fi
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs-site/.vitepress/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${ steps.deployment.outputs.page_url }
+    steps:
+      - name: 部署到 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
