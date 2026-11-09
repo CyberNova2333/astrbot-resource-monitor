@@ -1,13 +1,19 @@
 import DefaultTheme from 'vitepress/theme'
 import type { Theme } from 'vitepress'
 import Layout from './Layout.vue'
+import {
+  checkAndApplyLanguageRedirect,
+  setupLanguageSwitcherListener,
+} from './i18n';
 import './style.css'
 
 const theme: Theme = {
   extends: DefaultTheme,
   Layout,
-  enhanceApp({ router }) {
-    if (typeof window === 'undefined') return
+  enhanceApp({ router, siteData }) {
+    if (typeof window === 'undefined') return;
+    setupLanguageSwitcherListener();
+    checkAndApplyLanguageRedirect(siteData.value?.base || '/');
     // 动效加载失败时仍保留完整的阅读与外观切换功能。
     void import('./toggle')
       .then(({ setupAppearanceToggle }) => setupAppearanceToggle())
