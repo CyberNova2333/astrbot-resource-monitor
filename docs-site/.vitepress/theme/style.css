@@ -132,6 +132,10 @@
   --vp-code-line-number-color: #6e7681;
   color-scheme: dark;
 }
+html,
+body {
+  overflow-x: clip;
+}
 body {
   font-family: var(--adv-docs-font-sans);
   font-size: 16px;
@@ -198,6 +202,7 @@ body {
   inset: 0;
   z-index: 1001;
   pointer-events: none;
+  overflow: hidden;
 }
 .adv-docs-deco__band {
   position: fixed;
@@ -599,8 +604,9 @@ html:not(.motion-on) .vp-doc h2::after {
   border-color: rgba(147, 197, 253, 0.18);
 }
 .vp-doc table {
+  display: block;
+  overflow-x: auto;
   border-radius: var(--adv-docs-r-md);
-  overflow: hidden;
   box-shadow: var(--adv-docs-shadow-sm);
 }
 .vp-doc table thead {
@@ -1501,13 +1507,61 @@ body {
 }
 
 @media (max-width: 768px) {
+  .VPNavBar .wrapper {
+    padding: 0 12px 0 16px !important;
+  }
+  .VPNavBar .container {
+    max-width: 100% !important;
+  }
+  .VPNavBarTitle {
+    flex-shrink: 1 !important;
+    min-width: 0 !important;
+  }
+  .VPNavBarTitle .title {
+    font-size: 15px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    max-width: calc(100vw - 180px) !important;
+  }
+  .VPNavBarSearch {
+    padding-left: 0 !important;
+    flex-shrink: 0 !important;
+  }
+  .VPNavBarSearch .DocSearch-Button,
+  .VPNavBarSearchButton {
+    width: 36px !important;
+    height: 36px !important;
+    padding: 0 !important;
+    justify-content: center !important;
+  }
+  .VPNavBarSearch .DocSearch-Button-Placeholder,
+  .VPNavBarSearch .DocSearch-Button-Keys,
+  .VPNavBarSearchButton .text,
+  .VPNavBarSearchButton .keys {
+    display: none !important;
+  }
+  .VPNavBarSearch .DocSearch-Button-Container {
+    gap: 0 !important;
+  }
+  .VPNavBarSearch .DocSearch-Search-Icon {
+    margin: 0 !important;
+  }
   .cbnv-serious-toggle:not(.cbnv-serious-toggle--mobile)
     .cbnv-serious-toggle__label {
-    display: none;
+    display: none !important;
   }
   .cbnv-serious-toggle:not(.cbnv-serious-toggle--mobile) {
-    padding: 0 8px;
-    margin-left: 6px;
+    padding: 0 6px !important;
+    margin-left: 4px !important;
+    width: 32px !important;
+    height: 32px !important;
+    justify-content: center !important;
+    flex-shrink: 0 !important;
+  }
+  .VPNavBarHamburger {
+    width: 40px !important;
+    flex-shrink: 0 !important;
   }
 }
 
