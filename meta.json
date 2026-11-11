@@ -1,0 +1,62 @@
+{
+  "$schema": "https://raw.githubusercontent.com/CyberNova2333/cybernova-homepage/main/public/schemas/repo-meta.v1.json",
+  "schemaVersion": 1,
+  "slug": "astrbot-resource-monitor",
+  "name": "AstrBot Resource Monitor",
+  "title": {
+    "zh": "AstrBot Resource Monitor · 资源下载线路检查与告警插件",
+    "en": "AstrBot Resource Monitor · Resource Line Check & Alert Plugin"
+  },
+  "visibility": "public",
+  "status": "active",
+  "category": "cloud-edge",
+  "featured": false,
+  "order": 10,
+  "repository": "https://github.com/CyberNova2333/astrbot-resource-monitor",
+  "homepage": "https://cybernova2333.github.io/astrbot-resource-monitor/",
+  "docsUrl": "https://cybernova2333.github.io/astrbot-resource-monitor/docs/",
+  "license": "GPL-3.0-only",
+  "primaryLanguage": "Python",
+  "techStack": [
+    "Python 3",
+    "AstrBot",
+    "Asyncio",
+    "HTTP Range",
+    "TLS Probe"
+  ],
+  "tags": [
+    "astrbot-plugin",
+    "monitoring",
+    "content-check",
+    "alerting"
+  ],
+  "summary": {
+    "zh": "用于 AstrBot 的资源线路定时检查插件，除了看 HTTP 状态码外，还会按清单抽查 Range 分块、文件 MD5 和证书有效期，发现异常时发送消息提醒。",
+    "en": "AstrBot plugin that periodically checks resource download lines by verifying manifest files, HTTP Range slices, MD5 hashes, and TLS certificates."
+  },
+  "highlights": {
+    "zh": [
+      "不仅检查 HTTP 200，还会核对清单文件、Range 分块字节与 MD5，用来发现 CDN 返回错误页面或文件截断的情况",
+      "发起请求前对域名解析结果做公网地址检查，防止误访问内网地址",
+      "支持连续失败确认、重复告警合并、恢复通知与按会话静音"
+    ],
+    "en": [
+      "Checks manifest files, HTTP Range slices, and MD5 hashes to detect corrupted or truncated CDN responses",
+      "Validates resolved IPs against private address ranges before making requests",
+      "Includes retry confirmation, alert deduplication, recovery notifications, and per-recipient mute"
+    ]
+  },
+  "quickStart": [
+    "python tools/check-no-endpoints.py",
+    "python -m unittest discover -s tests -t ."
+  ],
+  "roadmap": {
+    "stage": "日常维护",
+    "stageEn": "Maintained",
+    "milestone": {
+      "zh": "已完成分块校验、内网地址过滤与告警去重逻辑。",
+      "en": "Chunk verification, IP filtering, and alert deduplication are complete."
+    }
+  },
+  "updatedAt": "2026-11-11"
+}
