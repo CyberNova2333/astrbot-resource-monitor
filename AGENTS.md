@@ -55,3 +55,10 @@ Choose `none`, `answer-only`, `foreground patch`, or `background sync`. Patch th
 维护守卫安装命令为 `python tools/repo_maintenance_guard.py install`。仅在明确安装任务下执行；文档修改不自动安装或更改 Git 配置。保留已有安全钩子，安装与验证结果按实际执行另行记录。
 
 文档站统一使用 VitePress 默认主题；样式与动效遵循原生主题，构建输出独立于业务界面。
+
+## 项目简介与主页元数据 (meta.json)
+
+- **项目名称**：AstrBot Resource Monitor · 资源下载线路检查与告警插件
+- **项目简介**：用于 AstrBot 的资源线路定时检查插件，除了看 HTTP 状态码外，还会按清单抽查 Range 分块、文件 MD5 和证书有效期，发现异常时发送消息提醒。
+- **公开状态**：已公开 (public) · 分类：`cloud-edge` · 主语言：`Python`
+- **元数据说明**：仓库根目录的 [`meta.json`](meta.json) 供个人主页（[`cybernova-homepage`](https://github.com/CyberNova2333/cybernova-homepage)）读取项目简介、功能说明、技术栈和常用命令。修改项目主要功能、技术栈或文档站链接时请同步更新 `meta.json`。
