@@ -1,30 +1,14 @@
 # 指南变更记录
 
-## 2026-10-29：建立主流程指南并对齐文档入口
+## 2026-11-15 20:50 CST：全面重置文档体系并升级 Standard 源码指南
 
-- 触发：用户授权 widened docs sync；同步决策为 `foreground patch`，在共享工作树完成指定文档层。
-- 建立阅读路径、主流程、代码地图、两遍源码证据与阅读质量审计；范围限定为 一轮配置发现和内容检查到 QQ 官方通知查询与确认。
-- 保留中文 README 的现有正确内容，补齐英文入口和文档站操作；AGENTS 成为规则单一来源，CLAUDE 简短引用。
-- 新建 MkDocs 1.6.1 内置主题站点；验证输出写入仓库外目录，保留业务构建产物。
-- 验证：`validate_repo_docs.py --lite` 与 `mkdocs build --strict` 均退出 0；源码链接 INFO 和保留提示见独立维护报告。未跑业务测试，不代表生产验证。
-- 边界：不逐项覆盖所有探针算法、慢周期整包下载和每个平台适配器；没有真实 AstrBot/QQ 交互或云端线路验收，不提供自动修复或内网监控。
+- 触发：全工作区文档重置，彻底清除此前面向主机性能监控的模板幻觉文本，并将分散在旧版 `docs/PROBES.md` 中的全部技术事实并入 `docs-site/` 与 `repo-docs/` 后移除冗余散页。
+- 扩展为 Standard 包：新增 4 篇概念模块（[配置源、分层与过期降级](modules/sources-and-degraded.md)、[十项探针判据、多数共识与分块轮转](modules/probes-and-rotation.md)、[告警抑制窗口、持久化队列与人工确认](modules/alert-state-and-delivery.md)、[目标校验、响应上限与命令闸门](modules/security-and-gates.md)）及[术语表](glossary.md)，同步更新主入口、真实运行主流程、代码地图与两份审计记录。
+- 纠偏与补充：依据 `main.py`、`watch/` 源码、`_conf_schema.json`、`config.example.json` 与 `tests/` 全部 20 个测试文件，补全 10 项探针全表、两级抑制键、7 天轮转覆盖、`PublicResolver` / `64 MiB` / `render.safe()` 防护边界，以及 `config.example.json` 与运行期告警键名差异说明。
+- 验证：本轮运行 `validate_repo_docs.py`（Standard 模式）、`python3 tools/check-no-endpoints.py --verbose`、`python3 -m unittest discover -s tests -t . -v`、`python3 -m compileall -q tools watch main.py` 及 VitePress 站点构建。
 
-协作范围：CONTRIBUTING.md 由统一维护任务同步，本 worker 未编辑；末次校验未再报告该提示。
+Synced through 8777215a96373c8b67299a0ce8955469b905f37b
 
-Synced through 033a335629214d58ac2de67f7c8921d3ad2833f2
+## 2026-10-29 22:00 CST：文档站迁移为 VitePress 默认主题
 
-## 统一维护复核（2026-10-29）
-
-补齐中英 README 入口、贡献与安全说明；AGENTS 为规范正文，CLAUDE 为引用入口。补充钩子检查暂存内容、提交标题及推送新增历史，保留项目原有检查；安装步骤与边界见根 SECURITY 和 CONTRIBUTING。独立站点采用 VitePress 默认主题，源码链接在网页中保留为精确路径。
-
-现有提交已符合标题规范，无需重建。
-
-文档结构校验和站点构建均退出 0；共用护栏的 9 项隔离测试通过。业务测试、生产部署和远端发布未因此视为通过。大文件扫描边界见 SECURITY。
-
-Synced through 033a335629214d58ac2de67f7c8921d3ad2833f2；源码树与原锚点对应，未提交实现仍按工作树单列。
-
-## 文档站恢复默认主题（2026-10-29）
-
-提交检查补充识别文档依赖锁文件里的公开包索引、上游资助链接，以及平台 noreply 签署邮箱。运行地址与敏感内容检查继续生效，新增回归覆盖伪装成包索引的非许可主机。
-
-按用户要求统一使用 VitePress 默认主题，移除额外配色、字体、圆角和入场动效。指南正文、源码定位及导航保留；文档依赖与业务依赖分开。新建站点从 MkDocs 迁移为 VitePress，既有两个 VitePress 站点使用原生主题入口。
+按维护任务统一切换站点工具链至 VitePress 1.6.4 默认主题并补充锁文件守卫检验；早期构建与审计基线保留作历史参照（原 Lite 范围已由本轮 Standard 重置覆盖）。

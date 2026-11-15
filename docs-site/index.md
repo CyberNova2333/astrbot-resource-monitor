@@ -2,60 +2,61 @@
 layout: home
 
 hero:
-  name: AstrBot 监控插件
-  text: 现代技术基础设施
-  tagline: AstrBot Resource Monitor 是面向 AstrBot 宿主机器人的**系统资源监控插件与端点防泄漏安全守卫组件**。
+  name: AstrBot Resource Monitor
+  text: 资源分发线路巡检与告警插件
+  tagline: 基于客户端同一份校验口径，定时核查配置源、清单一致性、HTTP Range 分片、MD5 散列、热更包与 TLS 证书到期，经由多轮防抖与 QQ 官方人工确认闭环投递。
   actions:
     - theme: brand
-      text: 快速开始阅读
+      text: 1. 起步与配置部署
       link: /docs/
     - theme: alt
-      text: 交互式架构全景
-      link: /docs/architecture
+      text: 2. 探针契约与扩展
+      link: /docs/contracts
     - theme: alt
-      text: GitHub 仓库
-      link: https://github.com/CyberNova2333/astrbot-resource-monitor
+      text: 3. 原理与交互拓扑
+      link: /docs/architecture
 
 features:
-  - title: 极简快速上手
-    details: 通俗易懂的文档组织结构，分钟级完成环境搭建与快速启动。
-  - title: 严密安全防护
-    details: 零凭据泄漏防护、受控沙箱隔离与细粒度白名单权限控制。
-  - title: 现代化视觉呈现
-    details: 质感模式与简约模式双向自适应，内建 Archify 交互架构图表。
+  - title: 从配置源现场自发现
+    details: 拒绝在插件仓库硬编码第二份线路表或限速阈值。支持 endpoint 动态发现与 mirrors 本地列表两种源模式，并在主入口异常时用未超龄快照作仅参考的降级线索。
+  - title: 十项内容与协议级探针
+    details: 覆盖线上配置合理性、清单解析、多数共识、HTTP 206 Range 支持、32 位 MD5 分块轮转校验、热更包流式校验及 TLS 证书余期提醒。
+  - title: 共享环境安全护栏与精确投递
+    details: 公网 DNS 绑定、逐跳重定向校验、64 MiB 缓存硬上限、命令闸门与出群文本净化，配合 M-of-N 防抖、静音留存与 QQ 官方查看确认闭环。
 ---
 
-## 架构全景
+## 按身份 / 目标快速入口
+
+| 你的身份与目标 | 建议入口 | 解决什么问题 |
+| --- | --- | --- |
+| 初次安装与接通群告警 | [1. 起步与配置部署](/docs/) 与 [配置矩阵与排错](/docs/configuration) | 在 AstrBot 安装插件，配通 `endpoint` / `mirrors`、会话 UMO 与 `/线路` 命令，排查常见配置报错 |
+| 对接自定义配置源或扩展探针 | [2. 接口与扩展契约](/docs/contracts) | 查清 10 项探针分级、`unknown=True` 判定边界、JSON 清单格式、`Source`/`HttpClient` 接口及安全假设 |
+| 研读源码流程、变更迁移与测试 | [3. 原理与源码导览（含决策迁移）](/docs/architecture) | 串联一轮完整巡检到确认流程、阅读源码地图与构架决策，对齐历史配置键迁移 |
+
+## 架构拓扑概览
 
 <div class="archify-diagram-card" style="margin: 1.5rem 0; border: 1px solid var(--vp-c-border); border-radius: 12px; overflow: hidden; background: var(--vp-c-bg-soft); box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 18px; background: var(--vp-c-bg-elv); border-bottom: 1px solid var(--vp-c-border); font-size: 13px;">
     <span style="font-weight: 600; color: var(--vp-c-text-1); display: flex; align-items: center; gap: 8px;">
-      <span style="font-size: 16px;">📐</span> 监控插件与安全守卫拓扑（基于 Archify 的高保真交互图表，支持平移/缩放/探查）
+      <span>插件宿主、守卫与告警投递交互拓扑（支持平移与缩放）</span>
     </span>
     <a href="/diagrams/monitor-architecture.html" target="_blank" rel="noreferrer" style="font-size: 12px; color: var(--vp-c-brand-1); text-decoration: none; font-weight: 500;">
-      在新窗口全屏打开 ↗
+      在新窗口全屏打开
     </a>
   </div>
   <iframe src="/diagrams/monitor-architecture.html" width="100%" height="520px" frameborder="0" style="display: block; border: none;" allowfullscreen loading="lazy"></iframe>
 </div>
 
-## 快速上手演示
+> **图表与源码实现对齐说明**：上方拓扑图展示 AstrBot 宿主、插件核心、SSRF 守卫与告警通道之间的宏观交互关系（图中「资源统计与日志」节点标签为早期总览命名）；当前 `watch/` 代码实际执行的是**外部资源分发线路的配置文件、清单、HTTP Range 分片 MD5、热更包与 TLS 证书巡检**，并不采集宿主机 CPU 或内存占用。
 
-```bash
-# 1. 运行本地端点守卫检查（确保无凭证与拓扑泄漏）
-python tools/check-no-endpoints.py
+## 本地快速检验
 
-# 2. 启动单测验证探针采集逻辑
-pytest tests/
+```sh
+# 1. 在仓库根目录运行离线单元测试（共 252 项；系统 Python 未装 aiohttp 时跳过 5 项连接边界测试）
+python3 -m unittest discover -s tests -t . -v
 
-# 3. 将插件目录软链或复制至 AstrBot 的 data/plugins/ 下即可自动加载
+# 2. 运行地址与凭证防泄漏扫描
+python3 tools/check-no-endpoints.py --verbose
 ```
 
-## 文档分层导航
-
-::: tip 按照读者需求快速跳转
-- **初次上手**：直接阅读 [快速入门与实战](/docs/)，走通环境配置与首次执行流程；
-- **架构探查**：查阅 [系统架构与设计](/docs/architecture)，全屏体验交互式拓扑图表；
-- **详细配置**：查阅 [配置与使用指南](/docs/configuration)，查阅所有环境变量与参数；
-- **排查解惑**：查阅 [常见问题与排错](/docs/faq)，快速定位解决使用疑难。
-:::
+深入阅读源码结构、概念模块与证据审计，请查看仓库根目录的 `repo-docs/README.md` 与 `repo-docs/walkthroughs/one-real-run.md`。

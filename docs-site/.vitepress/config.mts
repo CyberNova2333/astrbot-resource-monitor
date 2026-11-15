@@ -1,4 +1,3 @@
-// VitePress 官方文档配置 (Coolify 架构风格 + 中英双语支持)
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
@@ -7,96 +6,84 @@ export default defineConfig({
     root: {
       label: '简体中文',
       lang: 'zh-CN',
-      title: "AstrBot Resource Monitor 官方文档",
-      description: "AstrBot Resource Monitor 是专为 AstrBot 打造的轻量级主机性能监控与可视化卡片告警插件。",
+      title: 'AstrBot Resource Monitor 文档',
+      description: '面向 AstrBot 的定时资源分发线路探测插件文档：配置发现、HTTP Range 分片、MD5 校验、热更包与 TLS 证书有效期监控及告警投递。',
       themeConfig: {
-        siteTitle: "AstrBot 监控插件",
+        siteTitle: 'Resource Monitor',
         nav: [
-          { text: '官网首页', link: '/' },
-          { text: '快速入门', link: '/docs/' },
-          { text: '系统架构', link: '/docs/architecture' },
-          { text: '配置指南', link: '/docs/configuration' },
-          { text: '常见问题', link: '/docs/faq' },
+          { text: '首页', link: '/' },
+          { text: '1. 起步与配置', link: '/docs/' },
+          { text: '2. 契约与扩展', link: '/docs/contracts' },
+          { text: '3. 原理与导览', link: '/docs/architecture' },
           { text: 'GitHub', link: 'https://github.com/CyberNova2333/astrbot-resource-monitor' },
         ],
         sidebar: [
           {
-            text: '快速入门',
+            text: '1. 起步与配置部署',
             items: [
-              { text: '项目概览与上手', link: '/docs/' },
-            ]
+              { text: '概览、边界与插件安装', link: '/docs/' },
+              { text: '配置源、参数矩阵与排错 FAQ', link: '/docs/configuration' },
+            ],
           },
           {
-            text: '系统架构',
+            text: '2. 接口与扩展契约',
             items: [
-              { text: '架构设计与全景图', link: '/docs/architecture' },
-            ]
+              { text: '探针契约、安全护栏与扩展点', link: '/docs/contracts' },
+            ],
           },
           {
-            text: '配置与实践',
+            text: '3. 原理与源码导览（含决策迁移）',
             items: [
-              { text: '配置与使用指南', link: '/docs/configuration' },
-            ]
+              { text: '运行原理、交互拓扑与架构决策', link: '/docs/architecture' },
+            ],
           },
-          {
-            text: '运维与支持',
-            items: [
-              { text: '常见问题与排错', link: '/docs/faq' },
-            ]
-          }
         ],
         outline: { level: [2, 3], label: '本页目录' },
         docFooter: { prev: '上一页', next: '下一页' },
-      }
+      },
     },
     en: {
       label: 'English',
       lang: 'en-US',
       link: '/en/',
-      title: "AstrBot Resource Monitor Documentation",
-      description: "AstrBot Resource Monitor is a lightweight host performance monitoring and visual card alerting plugin designed for AstrBot.",
+      title: 'AstrBot Resource Monitor Docs',
+      description: 'Scheduled resource-distribution route probe plugin for AstrBot: config/manifest discovery, HTTP Range chunks, MD5 checksums, hot-update packages, TLS expiry, and multi-channel alerting.',
       themeConfig: {
-        siteTitle: "AstrBot Monitor",
+        siteTitle: 'Resource Monitor',
         nav: [
           { text: 'Home', link: '/en/' },
-          { text: 'Quick Start', link: '/en/docs/' },
-          { text: 'Architecture', link: '/en/docs/architecture' },
-          { text: 'Configuration', link: '/en/docs/configuration' },
-          { text: 'FAQ', link: '/en/docs/faq' },
+          { text: '1. Quick Start & Config', link: '/en/docs/' },
+          { text: '2. Contracts & Extensions', link: '/en/docs/contracts' },
+          { text: '3. Architecture & Decisions', link: '/en/docs/architecture' },
           { text: 'GitHub', link: 'https://github.com/CyberNova2333/astrbot-resource-monitor' },
         ],
         sidebar: [
           {
-            text: 'Quick Start',
+            text: '1. Getting Started & Config',
             items: [
-              { text: 'Overview & Getting Started', link: '/en/docs/' },
-            ]
+              { text: 'Overview, Boundaries & Install', link: '/en/docs/' },
+              { text: 'Config Matrix, Sources & FAQ', link: '/en/docs/configuration' },
+            ],
           },
           {
-            text: 'Architecture',
+            text: '2. Contracts & Extensions',
             items: [
-              { text: 'Architecture Design', link: '/en/docs/architecture' },
-            ]
+              { text: 'Probes, Security Gates & Extension Points', link: '/en/docs/contracts' },
+            ],
           },
           {
-            text: 'Configuration & Practice',
+            text: '3. Architecture & Decisions',
             items: [
-              { text: 'Configuration Guide', link: '/en/docs/configuration' },
-            ]
+              { text: 'Execution Flow, Topology & ADRs', link: '/en/docs/architecture' },
+            ],
           },
-          {
-            text: 'Operations & Support',
-            items: [
-              { text: 'FAQ & Diagnostics', link: '/en/docs/faq' },
-            ]
-          }
         ],
         outline: { level: [2, 3], label: 'On this page' },
         docFooter: { prev: 'Previous page', next: 'Next page' },
-      }
-    }
+      },
+    },
   },
   themeConfig: {
     search: { provider: 'local' },
-  }
+  },
 })

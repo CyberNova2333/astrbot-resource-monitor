@@ -1,35 +1,34 @@
 # 源码证据审计
 
-这是固定审计记录，记录 2026-10-29 的两遍调查；行为解释由主流程页承载，源码导航由代码地图承载。
+这是固定审计记录，记录按当前提交基线对全仓库源码与离线测试开展的两遍核查；机制讲解由主流程页和模块页承载，文件索引由代码地图承载。
 
 ## 遍历记录
 
 | 遍历 | 实际检查 | 得到的依据 |
 | --- | --- | --- |
-| Pass 1 | 仓库目录、Git 状态、父级及 root AGENTS/CLAUDE、README、`main.py` 的包加载与命令入口、`requirements.txt`、现有 `docs/PROBES.md` 和 CI 配置 | 确定真实入口、运行命令及现存文档；README 只作线索 |
-| Pass 2 | `watch/runner.py`、`watch/state.py`，`main.py` 的逐接收者投递与查询确认分支，`tests/test_delivery.py`、`test_qq_official.py` 和监控回归 | 追踪主路径的输入、输出与失败分支，并对照测试断言 |
+| Pass 1 | 全仓结构、`AGENTS.md`、`main.py`、`_conf_schema.json`、`config.example.json`、`metadata.yaml`、`requirements.txt`、`.github/workflows/main-checks.yml`、`tools/check-no-endpoints.py` 及待迁出清退的原探针独立说明页 | 核准仓库真实定位为 AstrBot 资源分发线路监控插件，清理无代码引用的独立草稿并排查与运行时字段差异 |
+| Pass 2 | `watch/` 全模块（`config.py`、`sources.py`、`discovery.py`、`http.py`、`probes.py`、`runner.py`、`scheduler.py`、`state.py`、`store.py`、`commands.py`、`render.py`、`models.py`）及 `tests/` 20 个测试文件 | 逐一确认配置源归一化、10 项探针、7 天轮转、两级抑制、64 MiB 上限、公网校验、文本净化与 QQ 官方确认细节 |
 
 ## 覆盖与排除
 
-覆盖：一轮配置发现和内容检查到 QQ 官方通知查询与确认。不逐项覆盖所有探针算法、慢周期整包下载和每个平台适配器；没有真实 AstrBot/QQ 交互或云端线路验收，不提供自动修复或内网监控。
-
+本轮升级为 Standard 全覆盖包，涵盖 `main.py` 框架适配、全部 10 项探针与快慢调度、`watch/sources.py` 配置源与降级诊断、`watch/state.py` 滑动窗口、静音与队列落盘，以及 `watch/http.py` / `commands.py` / `render.py` 安全边界；原零散探测说明已全部迁入本指南与 `docs-site/` 后移除。本包仅验证离线替身单元测试与地址守卫，不覆盖未安装 `aiohttp` 时的实网会话层、真实 AstrBot 宿主、公网镜像环境及 QQ 官方平台实际送达。
 
 ## 声明与证据
 
 | Claim | Evidence | Confidence | Caveat | Used by |
 | --- | --- | --- | --- | --- |
-| 上次好配置仅作诊断，不用于判绿 | [编排器](../../watch/runner.py) 搜索 `last_good_snapshot` | 已确认 | 当前配置失败仍需保留未判定状态 | 主流程 Step 1–2 |
-| 每个接收者前重查静音与过期故障 | [入口](../../main.py) 搜索 `_discard_stale`；[回归](../../tests/test_delivery.py) | 已确认 | 本轮未跑，远端送达未验证 | 主流程 Step 3 |
-| 官方发送成功调用只记录 submitted | [投递](../../main.py) 搜索 `submitted`；[官方测试](../../tests/test_qq_official.py) | 已确认 | 不代表平台或真人收到 | 主流程 Step 4 |
-| 查询不清除，确认绑定用户/会话/通知 | [查询与确认](../../main.py) 搜索 `_shown_notifications` | 已确认 | 重启后重新查看；保存失败不确认 | 主流程 Step 4 |
+| 配置源支持 endpoint 与 mirrors 且运行时优先读 WebUI 再兜底环境变量文件 | [config.py](../../watch/config.py) 与 [sources.py](../../watch/sources.py) 的 `load`、`build`；[test_config.py](../../tests/test_config.py) | 已确认 | `config.example.json` 仍存在未消费的旧示例键名 `fire_after`/`recover_after` | 配置源与降级页 |
+| 入口失联后仅借未超龄快照作诊断提示，标 `unknown=True` 且不判绿不告警 | [runner.py](../../watch/runner.py) 的 `_diagnose_entry_failure`；[test_runner.py](../../tests/test_runner.py) `EntryDownDiagnosisTest` | 已确认 | 需部署侧先成功拉取至少一次健康快照才可用 | 主流程 Step 1；配置源与降级页 |
+| 10 项探针分快慢双锁与并发信号量运行，手动 `/线路 测` 禁用整包核对，慢下载期间配置变化不污染新调度 | [probes.py](../../watch/probes.py)、[runner.py](../../watch/runner.py) 的 `_slow_round`（`allow_heavy=False`）；[test_probes.py](../../tests/test_probes.py) | 已确认 | 分块与一致性基线依赖过半数有效清单 | 主流程 Step 2；探针与轮转页 |
+| 每个接收者发送前重检静音与恢复，QQ 官方只记 `submitted` 并绑定 `/线路 通知` 查看者与管理员 `/线路 确认` | [main.py](../../main.py) 的 `_flush_outbox`、`_discard_stale`、`_pending_notification`、`_confirm_notification`；[test_delivery.py](../../tests/test_delivery.py)、[test_qq_official.py](../../tests/test_qq_official.py) | 已确认 | 离线使用 `astrbot_stub`，真实官方配额需部署验收 | 主流程 Step 3–4；告警与投递页 |
+| HTTP 禁 Cookie、禁环境代理、逐跳核验公网地址与 `MAX_BUFFER_BYTES = 64 MiB`，TLS 共用公网校验与 SNI，输出经 `safe()` 清洗 | [http.py](../../watch/http.py)、[probes.py](../../watch/probes.py) `_tls_not_after`、[render.py](../../watch/render.py) `safe`；[test_network_regressions.py](../../tests/test_network_regressions.py) | 已确认 | 无 `aiohttp` 时 5 项 `AiohttpBoundaryTest` 会被跳过 | 安全与闸门页 |
 
 ## 证伪检查与读者下一问
 
-证伪检查：若官方发送后直接清除队列、跨用户确认通知，或第一个接收者等待期间恢复后仍向第二个发送过期故障，这份通知模型就失效。应对照投递与官方确认回归逐项核对。
+证伪检查：若官方平台发出消息后立即清空队列而不待 `/线路 确认`、允许跨会话或非管理员确认、快周期发现恢复后仍继续向第二个群发送过期故障、`chunk_size` 能抬高进程缓存上限，或缺失阈值时不标 `unknown=True` 而硬编码默认速度判红，则对应模块说明即失效。
 
-读者下一问：某类 Range 或热更内容具体怎样判失败？从原有 `docs/PROBES.md` 与 `watch/probes.py`、对应探针测试继续；本页不覆盖所有判据。
+读者下一问：如果需要新增第三种配置源形状、调整某项探针的判定逻辑，或排查 `config.example.json` 与 `_conf_schema.json` 的键名对照，请分别从[配置源与降级说明](../modules/sources-and-degraded.md)、[十项探针判据与分块轮转](../modules/probes-and-rotation.md)与[代码地图](../code-map.md)查找对应测试入口。
 
 ## 验证边界
 
-本轮执行 `validate_repo_docs.py` 和 MkDocs 构建，退出码及完整输出保存在独立维护报告中；不将静态阅读当作业务测试通过。没有部署、生产验收或历史改写。
-所有 `../../` 源码链接按当前磁盘核对；独立站点没有这些仓库文件，MkDocs 对此记 INFO，站内链接仍正常检查。未解析、展示或引用真实凭据和运行时数据库内容；现有未提交文件仅作本地摘要保全。
+本轮执行 `python3 -m unittest discover -s tests -t . -v`、`python3 tools/check-no-endpoints.py --verbose`、`python3 -m compileall -q tools watch main.py`、`validate_repo_docs.py` 及 `pnpm --dir docs-site run docs:build`。其中系统 Python 环境缺少 `aiohttp`，导致 [test_network_regressions.py](../../tests/test_network_regressions.py) 内 5 项 `AiohttpBoundaryTest` 跳过，其余 247 项单元测试均运行核对；所有端到端联网与聊天平台行为仍以部署侧运行验收为准。
