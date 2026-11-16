@@ -23,6 +23,8 @@ In resource-distribution pipelines, most user-facing breakages look healthy to g
 - **No auto-remediation**: Read-only observation never writes back to upstream configs or switches routes.
 - **No business data storage**: Only alert state, rotation progress, and pending notifications live in `state_dir`.
 
+> **Interactive Reference**: Browse all 10 content probes, `64 MiB` & SSRF guardrails, 8 `/线路` commands, and `Source`/`HttpClient` extension SPIs in the [API & Component Reference](/en/api-reference/).
+
 ## Installation & Quick Check
 
 1. Copy or symlink this repository into AstrBot's plugin directory (e.g., `data/plugins/astrbot_plugin_resource_watch/`), keeping `main.py` alongside `watch/` (the plugin loads via package-relative imports).

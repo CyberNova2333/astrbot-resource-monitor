@@ -14,8 +14,11 @@ export default defineConfig({
           { text: '首页', link: '/' },
           { text: '起步与配置', link: '/docs/' },
           { text: '契约与扩展', link: '/docs/contracts' },
+          { text: 'API 与探针', link: '/api-reference/' },
           { text: '原理与导览', link: '/docs/architecture' },
-          { text: 'GitHub', link: 'https://github.com/CyberNova2333/astrbot-resource-monitor' },
+        ],
+        socialLinks: [
+          { icon: 'github', link: 'https://github.com/CyberNova2333/astrbot-resource-monitor' },
         ],
         sidebar: [
           {
@@ -29,6 +32,7 @@ export default defineConfig({
             text: '接口与扩展契约',
             items: [
               { text: '探针契约、安全护栏与扩展点', link: '/docs/contracts' },
+              { text: 'API、探针与指令参考', link: '/api-reference/' },
             ],
           },
           {
@@ -52,10 +56,13 @@ export default defineConfig({
         siteTitle: 'Resource Monitor',
         nav: [
           { text: 'Home', link: '/en/' },
-          { text: 'Quick Start & Config', link: '/en/docs/' },
-          { text: 'Contracts & Extensions', link: '/en/docs/contracts' },
-          { text: 'Architecture & Decisions', link: '/en/docs/architecture' },
-          { text: 'GitHub', link: 'https://github.com/CyberNova2333/astrbot-resource-monitor' },
+          { text: 'Quick Start', link: '/en/docs/' },
+          { text: 'Contracts', link: '/en/docs/contracts' },
+          { text: 'API & Probes', link: '/en/api-reference/' },
+          { text: 'Architecture', link: '/en/docs/architecture' },
+        ],
+        socialLinks: [
+          { icon: 'github', link: 'https://github.com/CyberNova2333/astrbot-resource-monitor' },
         ],
         sidebar: [
           {
@@ -69,6 +76,7 @@ export default defineConfig({
             text: 'Contracts & Extensions',
             items: [
               { text: 'Probes, Security Gates & Extension Points', link: '/en/docs/contracts' },
+              { text: 'API, Probes & Commands Reference', link: '/en/api-reference/' },
             ],
           },
           {

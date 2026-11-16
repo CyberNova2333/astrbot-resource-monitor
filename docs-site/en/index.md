@@ -10,6 +10,9 @@ hero:
       text: Quick Start & Config
       link: /en/docs/
     - theme: alt
+      text: API & Probes Reference
+      link: /en/api-reference/
+    - theme: alt
       text: Contracts & Extensions
       link: /en/docs/contracts
     - theme: alt
@@ -24,6 +27,19 @@ features:
   - title: Shared-Host Safety & Delivery
     details: Public IP resolution pinning, per-hop redirect checks, 64 MiB buffer cap, CommandGate rate limiting, output sanitization, persistent outbox, and QQ official viewer-bound ack.
 ---
+
+## Capabilities & Explicit Limits
+
+::: info What AstrBot Resource Monitor Delivers
+- **10 Content & Protocol Probes**: Validates config sanity, version non-regression, majority manifest consensus, HTTP `206` Range slicing, 32-hex MD5 chunk rotation (7-day coverage), hot-package streaming checksums, and TLS `<14d`/`<3d` expiry.
+- **Public-Only SSRF & Chat Safety**: `PublicResolver` pins public IPs (blocking loopback/private ranges and `trust_env` proxies), enforces a `64 MiB` fetch cap, sanitizes output via `render.safe()`, and drives `M-of-N` alerts + QQ Official `/线路 ack`.
+- **Dual-Lock Isolation & Pluggable SPIs**: Independent `300s` fast and `3600s` slow async locks plus offline-testable `Source` and `HttpClient` interfaces.
+:::
+
+::: warning Explicit Non-Goals & Hard Boundaries
+- **Strictly Read-Only Observation**: Never collects host CPU/RAM/disk metrics, never switches live CDN routing or edits upstream configs, and never acts as a long-term SLA database.
+- **Public Targets & Heavy-Check Gating**: Blocks LAN/private targets and env proxies; manual chat probes enforce `allow_heavy=False` and shared cooldowns; bundles zero built-in default endpoints (`entry_url` or `mirrors` is mandatory).
+:::
 
 ## Interactive Topology Overview
 

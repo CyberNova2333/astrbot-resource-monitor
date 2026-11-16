@@ -14,6 +14,14 @@
 - **Shared-Host Guardrails**: `PublicResolver` pins validated public IPs across redirects (`allow_redirects=False`), enforces a `64 MiB` buffer cap, disables cookies/env proxies, rate-limits `/线路` via `CommandGate`, and sanitizes untrusted text with `render.safe()`.
 - **Explicit Boundaries & Lock Separation**: Fast (`300s`) and slow (`3600s`) cycles run under independent async locks so large hot-package digests never stall quick checks; long-term SLA stats, host metrics, and auto-remediation remain strictly out of scope.
 
+## Capabilities & Explicit Non-Goals
+
+| Area | What AstrBot Resource Monitor Delivers | Explicit Non-Goals & Hard Bounds |
+| --- | --- | --- |
+| Probes & Discovery | Live `endpoint`/`mirrors` discovery running 10 `P0/P1/P2` probes (manifests, `206` Range, MD5 chunks, hot archives, TLS expiry) | **Never** collects host CPU/RAM/disk telemetry or acts as a long-term SLA archive |
+| Security & Alerting | Public IP pinning across redirects (`64 MiB` cap), `M-of-N` debounce, two-tier suppression, `render.safe()`, QQ Official ack | **Blocks** LAN/loopback targets & `trust_env`; chat `/线路 test` forces `allow_heavy=False` skipping full archives |
+| Isolation & SPIs | Separate fast/slow locks plus offline-testable `Source` & `HttpClient` SPIs | **Never** auto-switches CDN routes or edits upstream configs; bundles zero default URLs |
+
 ```mermaid
 flowchart LR
     S["Config Discovery (endpoint / mirrors)"] --> G["Sanity & Public SSRF Checks"]
@@ -68,7 +76,7 @@ Fill in `entry_url` (or `mirrors`) and target `notify.sessions` UMOs inside Astr
 | Reader Goal | Docs Site (`docs-site/en/`) | Engineering Guide (`repo-docs/`) |
 | --- | --- | --- |
 | Install, configure options & troubleshoot setup | [Getting Started](docs-site/en/docs/index.md) · [Config Matrix & FAQ](docs-site/en/docs/configuration.md) | [Sources & Degraded Mode (zh)](repo-docs/modules/sources-and-degraded.md) |
-| Inspect 10 probes, security gates & extension APIs | [Contracts & Extensions](docs-site/en/docs/contracts.md) | [Probes & Rotation (zh)](repo-docs/modules/probes-and-rotation.md) · [Security & Gates (zh)](repo-docs/modules/security-and-gates.md) |
+| Inspect 10 probes, security gates & extension APIs | [Contracts & Extensions](docs-site/en/docs/contracts.md) · [API & Component Reference](docs-site/en/api-reference/index.md) | [Probes & Rotation (zh)](repo-docs/modules/probes-and-rotation.md) · [Security & Gates (zh)](repo-docs/modules/security-and-gates.md) |
 | Trace execution flow, code layout & ADRs | [Architecture & Decisions](docs-site/en/docs/architecture.md) | [One Real Run (zh)](repo-docs/walkthroughs/one-real-run.md) · [Code Map (zh)](repo-docs/code-map.md) |
 | Audit evidence coverage & project glossary | — | [Glossary (zh)](repo-docs/glossary.md) · [Source Evidence (zh)](repo-docs/references/source-evidence.md) · [Quality Review (zh)](repo-docs/references/quality-review.md) |
 | Review contributor hooks & security policy | — | [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [Guardrails Guide](guardrails/README.md) |

@@ -14,6 +14,14 @@
 - **共享宿主多防线隔离**：`PublicResolver` 钉死公网解析并逐跳检查重定向（禁 Cookie、禁环境代理、单块缓冲硬上限 `64 MiB`），群指令受 `CommandGate` 冷却、白名单与禁下整包约束，外来文本经 `render.safe()` 防伪造清洗。
 - **明确边界与双周期隔离**：快巡检（默认 `300s`）与慢巡检（默认 `3600s`）各自加锁互不阻塞；插件刻意不做长期 SLA 报表、不自动切流，也不缓存宿主机或业务数据库数据。
 
+## 能做到什么程度与明确不能做什么
+
+| 维度 | 能做到什么程度（已实现能力） | 明确不能做什么（非目标与硬限制） |
+| --- | --- | --- |
+| 探针与发现 | 现场发现 `endpoint` / `mirrors`，运行 10 项 `P0/P1/P2` 探针（清单、206 Range、MD5 轮转、热更包与 TLS 到期） | **绝不采集**宿主机 CPU/内存/磁盘；**不提供**长期 SLA 可用率统计或业务数据库存储 |
+| 防线与告警闭环 | 公网 IP 钉死与逐跳重定向校验（64 MiB 上限）、`M-of-N` 防抖、两级抑制、`render.safe()` 与 QQ 官方确认闭环 | **不探测**内网/回环地址（禁 `trust_env`）；群手动 `/线路 测` 强迫 `allow_heavy=False` 跳过整包 |
+| 自动化与可扩展 | 双异步锁隔离；`Source` 与 `HttpClient` SPI 支持纯离线单测与自定义配置源接入 | **不自动修改**线上配置或切换 CDN 路由；仓库零内置默认地址（未配 `entry_url`/`mirrors` 即报错停用） |
+
 ```mermaid
 flowchart LR
     S["配置源发现 (endpoint / mirrors)"] --> G["合理性与公网 SSRF 校验"]
@@ -68,7 +76,7 @@ python3 -m unittest discover -s tests -t . -v
 | 读者目标 | 用户文档站（`docs-site/`） | 源码与机制指南（`repo-docs/`） |
 | --- | --- | --- |
 | 插件安装、完整参数矩阵与部署排错 | [起步与配置部署](docs-site/docs/index.md) · [参数与 FAQ](docs-site/docs/configuration.md) | [配置源、分层与过期降级](repo-docs/modules/sources-and-degraded.md) |
-| 核对 10 项探针契约、安全护栏与扩展 | [接口与扩展契约](docs-site/docs/contracts.md) | [探针与轮转](repo-docs/modules/probes-and-rotation.md) · [安全边界与闸门](repo-docs/modules/security-and-gates.md) |
+| 核对 10 项探针契约、安全护栏与扩展 | [接口与扩展契约](docs-site/docs/contracts.md) · [API 与组件参考](docs-site/api-reference/index.md) | [探针与轮转](repo-docs/modules/probes-and-rotation.md) · [安全边界与闸门](repo-docs/modules/security-and-gates.md) |
 | 追踪运行主路径、告警队列与架构决策 | [原理与源码导览（含决策迁移）](docs-site/docs/architecture.md) | [一次巡检与确认流程](repo-docs/walkthroughs/one-real-run.md) · [代码地图](repo-docs/code-map.md) |
 | 查阅源码证据覆盖、术语与审计风险 | — | [术语表](repo-docs/glossary.md) · [源码证据](repo-docs/references/source-evidence.md) · [质量审计](repo-docs/references/quality-review.md) |
 | 了解协作成规、提交钩子与安全报告 | — | [贡献规范](CONTRIBUTING.md) · [安全声明](SECURITY.md) · [护栏说明](guardrails/README.md) |

@@ -10,6 +10,9 @@ hero:
       text: 起步与配置部署
       link: /docs/
     - theme: alt
+      text: API 与探针参考
+      link: /api-reference/
+    - theme: alt
       text: 探针契约与扩展
       link: /docs/contracts
     - theme: alt
@@ -24,6 +27,19 @@ features:
   - title: 共享环境安全护栏与精确投递
     details: 公网 DNS 绑定、逐跳重定向校验、64 MiB 缓存硬上限、命令闸门与出群文本净化，配合 M-of-N 防抖、静音留存与 QQ 官方查看确认闭环。
 ---
+
+## 能力定位与明确边界
+
+::: info 能做到什么程度（已实现能力）
+- **10 项客户端一致性深度探针**：不仅看 HTTP 200，更校验配置突降/版本回退、多数共识、HTTP `206` Range、32 位 MD5 分块轮转（7 天覆盖度）、热更包流式整包校验与 `<14d`/`<3d` TLS 证书到期。
+- **公网 SSRF 钉死与共享防线**：`PublicResolver` 禁止内网/保留 IP（含 IPv4 映射 IPv6）与 `trust_env` 代理，锁定 `64 MiB` 缓冲天花板，配合 `M-of-N` 防抖、两级抑制、`render.safe()` 防注入与 QQ 官方 `/线路 通知` + `/线路 确认` 闭环。
+- **快慢双锁隔离与可插拔 SPI**：`300s` 快线与 `3600s` 慢线独立加锁不相互阻塞；`Source` 与 `HttpClient` 支持离线 `FakeClient` 无网全测。
+:::
+
+::: warning 明确不能做什么（非目标与硬限制）
+- **严格只读观察，不查宿主机也不自动切流**：绝不采集 AstrBot 宿主机 CPU/内存，绝不回改上游配置或切换 CDN，也不提供长期 SLA 可用率历史报表。
+- **禁内网与群聊重放保护**：强制拦截回环与私网目标且禁用环境代理；聊天指令强制 `allow_heavy=False` 跳过百 MB 整包，`/线路 确认` 始终只限管理员；仓库零内置默认源（必须手动配 `entry_url` 或 `mirrors`）。
+:::
 
 ## 架构拓扑概览
 
