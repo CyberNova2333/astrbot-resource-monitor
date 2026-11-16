@@ -12,27 +12,27 @@ export default defineConfig({
         siteTitle: 'Resource Monitor',
         nav: [
           { text: '首页', link: '/' },
-          { text: '1. 起步与配置', link: '/docs/' },
-          { text: '2. 契约与扩展', link: '/docs/contracts' },
-          { text: '3. 原理与导览', link: '/docs/architecture' },
+          { text: '起步与配置', link: '/docs/' },
+          { text: '契约与扩展', link: '/docs/contracts' },
+          { text: '原理与导览', link: '/docs/architecture' },
           { text: 'GitHub', link: 'https://github.com/CyberNova2333/astrbot-resource-monitor' },
         ],
         sidebar: [
           {
-            text: '1. 起步与配置部署',
+            text: '起步与配置部署',
             items: [
               { text: '概览、边界与插件安装', link: '/docs/' },
               { text: '配置源、参数矩阵与排错 FAQ', link: '/docs/configuration' },
             ],
           },
           {
-            text: '2. 接口与扩展契约',
+            text: '接口与扩展契约',
             items: [
               { text: '探针契约、安全护栏与扩展点', link: '/docs/contracts' },
             ],
           },
           {
-            text: '3. 原理与源码导览（含决策迁移）',
+            text: '原理与源码导览',
             items: [
               { text: '运行原理、交互拓扑与架构决策', link: '/docs/architecture' },
             ],
@@ -52,27 +52,27 @@ export default defineConfig({
         siteTitle: 'Resource Monitor',
         nav: [
           { text: 'Home', link: '/en/' },
-          { text: '1. Quick Start & Config', link: '/en/docs/' },
-          { text: '2. Contracts & Extensions', link: '/en/docs/contracts' },
-          { text: '3. Architecture & Decisions', link: '/en/docs/architecture' },
+          { text: 'Quick Start & Config', link: '/en/docs/' },
+          { text: 'Contracts & Extensions', link: '/en/docs/contracts' },
+          { text: 'Architecture & Decisions', link: '/en/docs/architecture' },
           { text: 'GitHub', link: 'https://github.com/CyberNova2333/astrbot-resource-monitor' },
         ],
         sidebar: [
           {
-            text: '1. Getting Started & Config',
+            text: 'Getting Started & Config',
             items: [
               { text: 'Overview, Boundaries & Install', link: '/en/docs/' },
               { text: 'Config Matrix, Sources & FAQ', link: '/en/docs/configuration' },
             ],
           },
           {
-            text: '2. Contracts & Extensions',
+            text: 'Contracts & Extensions',
             items: [
               { text: 'Probes, Security Gates & Extension Points', link: '/en/docs/contracts' },
             ],
           },
           {
-            text: '3. Architecture & Decisions',
+            text: 'Architecture & Decisions',
             items: [
               { text: 'Execution Flow, Topology & ADRs', link: '/en/docs/architecture' },
             ],

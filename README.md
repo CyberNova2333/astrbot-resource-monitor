@@ -67,9 +67,9 @@ python3 -m unittest discover -s tests -t . -v
 
 | 读者目标 | 用户文档站（`docs-site/`） | 源码与机制指南（`repo-docs/`） |
 | --- | --- | --- |
-| 插件安装、完整参数矩阵与部署排错 | [1. 起步与配置部署](docs-site/docs/index.md) · [参数与 FAQ](docs-site/docs/configuration.md) | [配置源、分层与过期降级](repo-docs/modules/sources-and-degraded.md) |
-| 核对 10 项探针契约、安全护栏与扩展 | [2. 接口与扩展契约](docs-site/docs/contracts.md) | [探针与轮转](repo-docs/modules/probes-and-rotation.md) · [安全边界与闸门](repo-docs/modules/security-and-gates.md) |
-| 追踪运行主路径、告警队列与架构决策 | [3. 原理与源码导览（含决策迁移）](docs-site/docs/architecture.md) | [一次巡检与确认流程](repo-docs/walkthroughs/one-real-run.md) · [代码地图](repo-docs/code-map.md) |
+| 插件安装、完整参数矩阵与部署排错 | [起步与配置部署](docs-site/docs/index.md) · [参数与 FAQ](docs-site/docs/configuration.md) | [配置源、分层与过期降级](repo-docs/modules/sources-and-degraded.md) |
+| 核对 10 项探针契约、安全护栏与扩展 | [接口与扩展契约](docs-site/docs/contracts.md) | [探针与轮转](repo-docs/modules/probes-and-rotation.md) · [安全边界与闸门](repo-docs/modules/security-and-gates.md) |
+| 追踪运行主路径、告警队列与架构决策 | [原理与源码导览（含决策迁移）](docs-site/docs/architecture.md) | [一次巡检与确认流程](repo-docs/walkthroughs/one-real-run.md) · [代码地图](repo-docs/code-map.md) |
 | 查阅源码证据覆盖、术语与审计风险 | — | [术语表](repo-docs/glossary.md) · [源码证据](repo-docs/references/source-evidence.md) · [质量审计](repo-docs/references/quality-review.md) |
 | 了解协作成规、提交钩子与安全报告 | — | [贡献规范](CONTRIBUTING.md) · [安全声明](SECURITY.md) · [护栏说明](guardrails/README.md) |
 

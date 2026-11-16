@@ -56,4 +56,4 @@ python3 tools/check-no-endpoints.py --verbose
 ## 下一步
 
 - 前往 [配置源、参数矩阵与排错 FAQ](/docs/configuration) 完成 `endpoint` / `mirrors` 配置并配通告警会话；
-- 了解十项探针判定细则、JSON 契约与扩展接口，见 [2. 接口与扩展契约](/docs/contracts)。
+- 了解十项探针判定细则、JSON 契约与扩展接口，见 [接口与扩展契约](/docs/contracts)。

@@ -67,9 +67,9 @@ Fill in `entry_url` (or `mirrors`) and target `notify.sessions` UMOs inside Astr
 
 | Reader Goal | Docs Site (`docs-site/en/`) | Engineering Guide (`repo-docs/`) |
 | --- | --- | --- |
-| Install, configure options & troubleshoot setup | [1. Getting Started](docs-site/en/docs/index.md) · [Config Matrix & FAQ](docs-site/en/docs/configuration.md) | [Sources & Degraded Mode (zh)](repo-docs/modules/sources-and-degraded.md) |
-| Inspect 10 probes, security gates & extension APIs | [2. Contracts & Extensions](docs-site/en/docs/contracts.md) | [Probes & Rotation (zh)](repo-docs/modules/probes-and-rotation.md) · [Security & Gates (zh)](repo-docs/modules/security-and-gates.md) |
-| Trace execution flow, code layout & ADRs | [3. Architecture & Decisions](docs-site/en/docs/architecture.md) | [One Real Run (zh)](repo-docs/walkthroughs/one-real-run.md) · [Code Map (zh)](repo-docs/code-map.md) |
+| Install, configure options & troubleshoot setup | [Getting Started](docs-site/en/docs/index.md) · [Config Matrix & FAQ](docs-site/en/docs/configuration.md) | [Sources & Degraded Mode (zh)](repo-docs/modules/sources-and-degraded.md) |
+| Inspect 10 probes, security gates & extension APIs | [Contracts & Extensions](docs-site/en/docs/contracts.md) | [Probes & Rotation (zh)](repo-docs/modules/probes-and-rotation.md) · [Security & Gates (zh)](repo-docs/modules/security-and-gates.md) |
+| Trace execution flow, code layout & ADRs | [Architecture & Decisions](docs-site/en/docs/architecture.md) | [One Real Run (zh)](repo-docs/walkthroughs/one-real-run.md) · [Code Map (zh)](repo-docs/code-map.md) |
 | Audit evidence coverage & project glossary | — | [Glossary (zh)](repo-docs/glossary.md) · [Source Evidence (zh)](repo-docs/references/source-evidence.md) · [Quality Review (zh)](repo-docs/references/quality-review.md) |
 | Review contributor hooks & security policy | — | [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [Guardrails Guide](guardrails/README.md) |
 
