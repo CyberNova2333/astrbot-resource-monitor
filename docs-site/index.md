@@ -43,17 +43,12 @@ features:
 
 ## 架构拓扑概览
 
-<div class="archify-diagram-card" style="margin: 1.5rem 0; border: 1px solid var(--vp-c-border); border-radius: 12px; overflow: hidden; background: var(--vp-c-bg-soft); box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
-  <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 18px; background: var(--vp-c-bg-elv); border-bottom: 1px solid var(--vp-c-border); font-size: 13px;">
-    <span style="font-weight: 600; color: var(--vp-c-text-1); display: flex; align-items: center; gap: 8px;">
-      <span>📐</span> <span>插件宿主、守卫与告警投递交互拓扑（支持平移与缩放）</span>
-    </span>
-    <a href="/diagrams/monitor-architecture.html" target="_blank" rel="noreferrer" style="font-size: 12px; color: var(--vp-c-brand-1); text-decoration: none; font-weight: 500;">
-      在新窗口全屏打开 ↗
-    </a>
-  </div>
-  <iframe src="/diagrams/monitor-architecture.html" width="100%" height="520px" frameborder="0" style="display: block; border: none;" allowfullscreen loading="lazy"></iframe>
-</div>
+<DiagramFrame
+  src="/diagrams/monitor-architecture.html"
+  title="插件宿主、守卫与告警投递交互拓扑（支持平移与缩放）"
+  aspect="900 / 408"
+  new-tab-label="在新窗口全屏打开 ↗"
+/>
 
 > **图表与源码实现对齐说明**：上方拓扑图展示 AstrBot 宿主、插件核心、SSRF 守卫与告警通道之间的宏观交互关系（图中「资源统计与日志」节点标签为早期总览命名）；当前 `watch/` 代码实际执行的是**外部资源分发线路的配置文件、清单、HTTP Range 分片 MD5、热更包与 TLS 证书巡检**，并不采集宿主机 CPU 或内存占用。
 

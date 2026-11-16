@@ -43,17 +43,12 @@ features:
 
 ## Interactive Topology Overview
 
-<div class="archify-diagram-card" style="margin: 1.5rem 0; border: 1px solid var(--vp-c-border); border-radius: 12px; overflow: hidden; background: var(--vp-c-bg-soft); box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
-  <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 18px; background: var(--vp-c-bg-elv); border-bottom: 1px solid var(--vp-c-border); font-size: 13px;">
-    <span style="font-weight: 600; color: var(--vp-c-text-1); display: flex; align-items: center; gap: 8px;">
-      <span>📐</span> <span>Host, Plugin, SSRF Guard & Alert Delivery Topology (Pan / Zoom)</span>
-    </span>
-    <a href="/diagrams/monitor-architecture.html" target="_blank" rel="noreferrer" style="font-size: 12px; color: var(--vp-c-brand-1); text-decoration: none; font-weight: 500;">
-      Open Fullscreen ↗
-    </a>
-  </div>
-  <iframe src="/diagrams/monitor-architecture.html" width="100%" height="520px" frameborder="0" style="display: block; border: none;" allowfullscreen loading="lazy"></iframe>
-</div>
+<DiagramFrame
+  src="/diagrams/monitor-architecture.html"
+  title="Host, Plugin, SSRF Guard & Alert Delivery Topology (Pan / Zoom)"
+  aspect="900 / 408"
+  new-tab-label="Open Fullscreen ↗"
+/>
 
 > **Implementation alignment note**: The embedded diagram depicts high-level topology between AstrBot, the plugin core, SSRF/output guards, and delivery channels. Actual probes implemented in `watch/` inspect **external distribution configs, manifests, HTTP Range chunks, MD5 hashes, hot-update archives, and TLS expiry** — never host CPU or memory telemetry.
 

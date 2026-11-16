@@ -17,15 +17,12 @@ Every scheduled tick or manual command follows five verifiable stages (for the f
 
 ## Interactive Architecture Diagram
 
-<div class="archify-diagram-card" style="margin: 1.5rem 0; border: 1px solid var(--vp-c-border); border-radius: 12px; overflow: hidden; background: var(--vp-c-bg-soft);">
-  <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 18px; background: var(--vp-c-bg-elv); border-bottom: 1px solid var(--vp-c-border); font-size: 13px;">
-    <span style="font-weight: 600; color: var(--vp-c-text-1);">Host Integration, SSRF Guard & Delivery Topology (Pan / Zoom)</span>
-    <a href="/diagrams/monitor-architecture.html" target="_blank" rel="noreferrer" style="font-size: 12px; color: var(--vp-c-brand-1); text-decoration: none; font-weight: 500;">
-      Open Fullscreen
-    </a>
-  </div>
-  <iframe src="/diagrams/monitor-architecture.html" width="100%" height="520px" frameborder="0" style="display: block; border: none;" allowfullscreen loading="lazy"></iframe>
-</div>
+<DiagramFrame
+  src="/diagrams/monitor-architecture.html"
+  title="Host Integration, SSRF Guard & Delivery Topology (Pan / Zoom)"
+  aspect="900 / 408"
+  new-tab-label="Open Fullscreen"
+/>
 
 > **Diagram note**: The interactive topology summarizes host integration, SSRF/command guards, and alert channels; actual `watch/` probes inspect distribution configs, manifests, HTTP Range slices, MD5 digests, and TLS certs rather than host CPU or memory.
 

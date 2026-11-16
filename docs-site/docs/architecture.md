@@ -19,15 +19,12 @@ description: 端到端单轮运行机制、交互式架构拓扑、模块代码�
 
 ## 架构交互全景图
 
-<div class="archify-diagram-card" style="margin: 1.5rem 0; border: 1px solid var(--vp-c-border); border-radius: 12px; overflow: hidden; background: var(--vp-c-bg-soft);">
-  <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 18px; background: var(--vp-c-bg-elv); border-bottom: 1px solid var(--vp-c-border); font-size: 13px;">
-    <span style="font-weight: 600; color: var(--vp-c-text-1);">宿主集成、SSRF 守卫与出站投递全景（支持拖拽与缩放）</span>
-    <a href="/diagrams/monitor-architecture.html" target="_blank" rel="noreferrer" style="font-size: 12px; color: var(--vp-c-brand-1); text-decoration: none; font-weight: 500;">
-      在新窗口全屏打开
-    </a>
-  </div>
-  <iframe src="/diagrams/monitor-architecture.html" width="100%" height="520px" frameborder="0" style="display: block; border: none;" allowfullscreen loading="lazy"></iframe>
-</div>
+<DiagramFrame
+  src="/diagrams/monitor-architecture.html"
+  title="宿主集成、SSRF 守卫与出站投递全景（支持拖拽与缩放）"
+  aspect="900 / 408"
+  new-tab-label="在新窗口全屏打开"
+/>
 
 > **读图对照提示**：上图反映 AstrBot 宿主、插件核心、安全护卫层与多通道告警模块之间的结构职责；实际巡检实现（`watch/probes.py` 等）核对的是分发配置、清单、分片、整包散列与 TLS 证书，而非图中早期概览标签所写的宿主 CPU/内存占用。
 
