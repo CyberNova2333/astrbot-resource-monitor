@@ -1,8 +1,12 @@
-# AstrBot Resource Monitor
+<h1 align="center">AstrBot Resource Monitor</h1>
 
-[English](README.en.md) · [在线文档站](https://astrbot-resource-monitor.cbnv.me/) · [源码与架构指南](repo-docs/README.md)
+<p align="center">
+  <code>Python 3.10+</code> · <code>aiohttp&gt;=3.14.5</code> · <code>AstrBot Plugin (astrbot_plugin_resource_watch)</code> · <a href="LICENSE"><code>AGPL-3.0-only</code></a>
+</p>
 
-`Python 3.10+` · `aiohttp>=3.14.5` · `AstrBot Plugin (astrbot_plugin_resource_watch)` · `AGPL-3.0-only`
+<p align="center">
+  <strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="https://astrbot-resource-monitor.cbnv.me/">在线文档站</a> · <a href="repo-docs/README.md">源码与架构指南</a>
+</p>
 
 **面向 AstrBot 的定时资源分发线路探测插件**：按目标客户端一致的内容与协议口径巡检外部配置入口、资源清单、HTTP `Range` 分片、MD5 校验和、热更版本包与 HTTPS 证书到期天数，经由多轮防抖抑制与持久化队列向聊天会话推送告警；插件严格只读、仅连接已校验公网地址，不自动修改配置也不采集宿主机 CPU/内存指标。
 

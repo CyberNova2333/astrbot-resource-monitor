@@ -1,8 +1,12 @@
-# AstrBot Resource Monitor
+<h1 align="center">AstrBot Resource Monitor</h1>
 
-[简体中文](README.md) · [Online Docs](https://astrbot-resource-monitor.cbnv.me/en/) · [Engineering Guide (zh)](repo-docs/README.md)
+<p align="center">
+  <code>Python 3.10+</code> · <code>aiohttp&gt;=3.14.5</code> · <code>AstrBot Plugin (astrbot_plugin_resource_watch)</code> · <a href="LICENSE"><code>AGPL-3.0-only</code></a>
+</p>
 
-`Python 3.10+` · `aiohttp>=3.14.5` · `AstrBot Plugin (astrbot_plugin_resource_watch)` · `AGPL-3.0-only`
+<p align="center">
+  <a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://astrbot-resource-monitor.cbnv.me/en/">Online Docs</a> · <a href="repo-docs/README.md">Engineering Guide (zh)</a>
+</p>
 
 **A scheduled resource-distribution route probe plugin for AstrBot**: it verifies remote config entrypoints, asset manifests, HTTP `Range` slices, MD5 checksums, hot-update archives, and TLS certificate expiration using the same rules as distribution clients, then delivers debounced alerts through a persistent outbox. The plugin is strictly read-only, pins connections to public IPs only, never alters upstream configs, and does not collect host CPU or memory telemetry.
 
