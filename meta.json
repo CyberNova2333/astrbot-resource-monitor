@@ -13,8 +13,8 @@
   "featured": false,
   "order": 10,
   "repository": "https://github.com/CyberNova2333/astrbot-resource-monitor",
-  "homepage": "https://cybernova2333.github.io/astrbot-resource-monitor/",
-  "docsUrl": "https://cybernova2333.github.io/astrbot-resource-monitor/docs/",
+  "homepage": "https://astrbot-resource-monitor.cbnv.me",
+  "docsUrl": "https://astrbot-resource-monitor.cbnv.me/docs/",
   "license": "AGPL-3.0-only",
   "primaryLanguage": "Python",
   "techStack": [
@@ -58,5 +58,5 @@
       "en": "Chunk verification, IP filtering, and alert deduplication are complete."
     }
   },
-  "updatedAt": "2026-11-11"
+  "updatedAt": "2026-11-17"
 }

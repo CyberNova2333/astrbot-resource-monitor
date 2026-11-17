@@ -1,6 +1,6 @@
 # AstrBot Resource Monitor
 
-[English](README.en.md) · [在线文档站](https://cybernova2333.github.io/astrbot-resource-monitor/) · [源码与架构指南](repo-docs/README.md)
+[English](README.en.md) · [在线文档站](https://astrbot-resource-monitor.cbnv.me/) · [源码与架构指南](repo-docs/README.md)
 
 `Python 3.10+` · `aiohttp>=3.14.5` · `AstrBot Plugin (astrbot_plugin_resource_watch)` · `AGPL-3.0-only`
 

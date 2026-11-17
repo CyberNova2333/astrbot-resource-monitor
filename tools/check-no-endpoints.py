@@ -51,7 +51,7 @@ ALLOWED_HOSTS = (
     "example.test", "example.com", "example.org", "example.net",
     "invalid", "localhost",
     # 第三方：框架与生态的文档/源码/包索引
-    "astrbot.app", "docs.astrbot.app", "github.com", "github.io", "raw.githubusercontent.com",
+    "astrbot.app", "docs.astrbot.app", "github.com", "github.io", "cbnv.me", "raw.githubusercontent.com",
     "pypi.org", "files.pythonhosted.org", "python.org", "docs.python.org",
     "www.python.org",
     # 文档构建的公开包索引与锁文件中的上游资助元数据，不是探测目标。
