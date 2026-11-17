@@ -5,7 +5,11 @@
 </p>
 
 <p align="center">
-  <strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="https://astrbot-resource-monitor.cbnv.me/">在线文档站</a> · <a href="repo-docs/README.md">源码与架构指南</a>
+  <strong>简体中文</strong> | <a href="README.en.md">English</a>
+</p>
+
+<p align="center">
+  <a href="https://astrbot-resource-monitor.cbnv.me/">在线文档站</a> · <a href="repo-docs/README.md">源码与架构指南</a>
 </p>
 
 **面向 AstrBot 的定时资源分发线路探测插件**：按目标客户端一致的内容与协议口径巡检外部配置入口、资源清单、HTTP `Range` 分片、MD5 校验和、热更版本包与 HTTPS 证书到期天数，经由多轮防抖抑制与持久化队列向聊天会话推送告警；插件严格只读、仅连接已校验公网地址，不自动修改配置也不采集宿主机 CPU/内存指标。
