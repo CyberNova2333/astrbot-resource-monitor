@@ -1,0 +1,11 @@
+branch:
+  - reg: ^main$
+    buttons:
+      - name: 手动构建检查
+        description: 运行代码检查、单元测试与文档站构建校验，不执行发布
+        event: web_trigger_check
+        groupName: 检查
+        permissions:
+          roles:
+            - owner
+            - master

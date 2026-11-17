@@ -16,6 +16,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   checks:
     runs-on: ubuntu-latest
@@ -35,25 +39,28 @@ jobs:
           PUSH_BASE: ${{ github.event.before }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          python3 tools/check-no-endpoints.py --verbose
-          python3 - <<'PY'
+          python3 -B tools/check-no-endpoints.py --verbose
+          python3 -B - <<'PY'
           import os, subprocess, sys
           base = os.environ.get('PR_BASE') or os.environ.get('PUSH_BASE', '')
           known = bool(base.strip('0')) and subprocess.run(
               ['git', 'cat-file', '-e', base + '^{commit}'], capture_output=True).returncode == 0
-          revision = base + '..HEAD' if known else 'HEAD'
-          commits = subprocess.check_output(['git', 'rev-list', revision], text=True)
-          subprocess.run([sys.executable, 'tools/check-no-endpoints.py', '--commits-stdin'],
-                         input=commits, text=True, check=True)
+          if not known:
+              print('拿不到可达 before（新建分支、手动触发或历史重放），跳过历史回溯；工作树已由 --verbose 完整检查。')
+              raise SystemExit(0)
+          commits = subprocess.check_output(['git', 'rev-list', base + '..HEAD'], text=True)
+          if commits.strip():
+              subprocess.run([sys.executable, '-B', 'tools/check-no-endpoints.py', '--commits-stdin'],
+                             input=commits, text=True, check=True)
           PY
 
       # 判据层测试刻意**不装任何第三方包**：探针只认 watch/http.py 里的协议，
       # 测试喂假实现。装依赖跑测试等于让 CI 的绿灯依赖 PyPI 当天的心情。
       - name: 🧪 判据层测试（离线，不打真线路）
-        run: python3 -m unittest discover -s tests -t . -v
+        run: python3 -B -m unittest discover -s tests -t . -v
 
       - name: 🧮 语法
-        run: python3 -m compileall -q tools watch main.py
+        run: python3 -B -m compileall -q tools watch main.py
 
   http-transport:
     runs-on: ubuntu-latest
@@ -65,4 +72,4 @@ jobs:
       - name: 安装运行依赖
         run: python3 -m pip install -r requirements.txt
       - name: HTTP 连接层回归（离线替身，不访问真实线路）
-        run: python3 -m unittest tests.test_network_regressions -v
+        run: python3 -B -m unittest tests.test_network_regressions -v

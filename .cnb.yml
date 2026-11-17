@@ -1,0 +1,40 @@
+.check-code: &check-code
+  name: 地址守卫与判据层测试
+  image: python:3.12-bookworm
+  script: |
+    set -eu
+    python3 -B tools/check-no-endpoints.py --verbose
+    python3 -B -m unittest discover -s tests -t . -v
+    python3 -B -m compileall -q tools watch main.py
+
+.build-docs: &build-docs
+  name: 构建并核对文档站
+  image: node:22-bookworm
+  script: |
+    set -eu
+    corepack enable
+    pnpm --dir docs-site install --frozen-lockfile
+    pnpm --dir docs-site run docs:build
+    test -f docs-site/.vitepress/dist/index.html
+
+main:
+  push:
+    - name: 持续集成与构建检查
+      lock:
+        key: checks_main
+        wait: true
+        cancel-in-wait: true
+      stages:
+        - *check-code
+        - *build-docs
+
+$:
+  web_trigger_check:
+    - name: 手动构建检查（不发布）
+      lock:
+        key: checks_manual
+        wait: true
+        cancel-in-wait: true
+      stages:
+        - *check-code
+        - *build-docs

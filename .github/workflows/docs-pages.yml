@@ -19,23 +19,38 @@ concurrency:
 
 jobs:
   build:
+    name: 构建文档站
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - name: 检出仓库
+        uses: actions/checkout@v4
+      - name: 安装 pnpm
+        uses: pnpm/action-setup@v4
         with:
           package_json_file: docs-site/package.json
-      - uses: actions/setup-node@v4
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: docs-site/pnpm-lock.yaml
       - name: 安装文档依赖
         run: pnpm --dir docs-site install --frozen-lockfile
+      - name: 配置 GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v5
       - name: 构建文档站
-        run: pnpm --dir docs-site run docs:build
-      - uses: actions/configure-pages@v5
+        env:
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: |
+          set -eu
+          if [ -f docs-site/public/CNAME ]; then
+            pnpm --dir docs-site run docs:build
+          else
+            base="${PAGES_BASE_PATH%/}/"
+            pnpm --dir docs-site run docs:build --base "$base"
+          fi
       - name: 核对并补充 Pages 文件
         run: |
           set -eu
@@ -44,17 +59,19 @@ jobs:
           if [ -f docs-site/public/CNAME ]; then
             cp docs-site/public/CNAME docs-site/.vitepress/dist/CNAME
           fi
-      - uses: actions/upload-pages-artifact@v3
+      - name: 上传 Pages 产物
+        uses: actions/upload-pages-artifact@v3
         with:
           path: docs-site/.vitepress/dist
 
   deploy:
+    name: 部署到 GitHub Pages
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
       name: github-pages
-      url: ${ steps.deployment.outputs.page_url }
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: 部署到 GitHub Pages
         id: deployment
