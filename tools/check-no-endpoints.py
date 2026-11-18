@@ -64,9 +64,10 @@ ALLOWED_HOSTS = (
     "127.0.0.1", "0.0.0.0", "::1",
 )
 
-# 允许出现的邮箱域（署名 trailer 用，AGENTS.md §1 三）
+# 允许出现的邮箱域（署名/DCO trailer 用，AGENTS.md §1 三）
 ALLOWED_MAIL_DOMAINS = ("anthropic.com", "openai.com", "moonshot.cn",
                         "deepseek.com", "google.com", "users.noreply.github.com",
+                        "noreply.cnb.cool",
                         "example.test", "example.com")
 
 # 整份豁免的文件：许可证原文、以及本脚本自己（它必须写得出这些模式）。
