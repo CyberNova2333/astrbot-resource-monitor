@@ -104,7 +104,7 @@ def main():
         probs = _branchrules.problems(name)
         tag = "允许" if not probs else "⚠ 不合规"
         age = ""
-        if name not in ("main", "docs-site"):
+        if name != "main":
             h = tip_age_hours(sha, name)
             age = ("  （末次提交 %.1f 小时前）" % h) if h is not None else "  （时间未知）"
             limit = _branchrules.lifetime_hours(name)

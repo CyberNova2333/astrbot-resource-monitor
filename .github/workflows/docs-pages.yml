@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
 
@@ -60,26 +60,6 @@ jobs:
           if [ -f docs-site/public/CNAME ]; then
             cp docs-site/public/CNAME docs-site/.vitepress/dist/CNAME
           fi
-      - name: 发布静态产物到 docs-site 分支
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SOURCE_SHA: ${{ github.sha }}
-          SERVER_URL: ${{ github.server_url }}
-          REPO_SLUG: ${{ github.repository }}
-        run: |
-          set -eu
-          work=$(mktemp -d)
-          trap 'rm -rf "$work"' EXIT
-          cp -a docs-site/.vitepress/dist/. "$work/"
-          git -C "$work" init -b docs-site
-          git -C "$work" config user.name "github-actions[bot]"
-          git -C "$work" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git -C "$work" add -A
-          git -C "$work" commit -m "docs(docs-site): 构建并发布文档站静态产物 (${SOURCE_SHA:0:7})"
-          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')
-          git -C "$work" \
-            -c "http.${SERVER_URL%/}/.extraheader=AUTHORIZATION: basic ${auth}" \
-            push --force "${SERVER_URL%/}/${REPO_SLUG}.git" docs-site:refs/heads/docs-site
       - name: 上传 Pages 产物
         uses: actions/upload-pages-artifact@v3
         with:
