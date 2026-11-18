@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-only
+# This file is part of AstrBot Resource Monitor and is licensed under GNU AGPLv3 with Additional Terms (see LICENSE and ADDITIONAL_TERMS.zh-CN.md; ref: ADDITIONAL_TERMS.en.md).
 """把结论渲染成群里那条消息。
 
 **坏消息要能让人不打开电脑就判断要不要起床。** 所以每条告警都带三样：

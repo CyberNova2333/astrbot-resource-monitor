@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-only
+# This file is part of AstrBot Resource Monitor and is licensed under GNU AGPLv3 with Additional Terms (see LICENSE and ADDITIONAL_TERMS.zh-CN.md; ref: ADDITIONAL_TERMS.en.md).
 """故障状态机 + 去重 + 抑制链 + 静音 + 落盘。
 
 **会喊狼来了的告警比没有告警更糟**（CLAUDE.md 铁律 6）。这个文件就是那条铁律的

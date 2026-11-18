@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-only
+# This file is part of AstrBot Resource Monitor and is licensed under GNU AGPLv3 with Additional Terms (see LICENSE and ADDITIONAL_TERMS.zh-CN.md; ref: ADDITIONAL_TERMS.en.md).
 """判据层：**不依赖 AstrBot**（CLAUDE.md 铁律 3）。
 
 进去 URL + 期望，出来 ProbeResult。所有 I/O 都通过 `watch.http.HttpClient`

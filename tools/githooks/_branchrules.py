@@ -74,9 +74,9 @@ def _meaningful(words):
 def problems(name):
     """返回这条分支名不合规之处的列表（每项是一段给人看的说明）。
 
-    合规（`main` 或 `<类>/<读得出用途>`）则返回空列表。
+    合规（`main`、静态文档站分支 `docs-site` 或 `<类>/<读得出用途>`）则返回空列表。
     """
-    if name == "main":
+    if name in ("main", "docs-site"):
         return []
 
     for p in CI_SHAPED:

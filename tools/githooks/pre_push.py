@@ -191,7 +191,10 @@ def check_endpoints(refs):
         sys.stderr.write("pre-push: 地址守卫缺失，本次放行\n")
         return None                                  # 守卫不在也放行
     commits = set()
-    for local_sha, _, remote_sha in refs:
+    for local_sha, branch, remote_sha in refs:
+        # docs-site 仅存放从主线构建的纯静态文档站输出（源码与文档原文已在主线过守卫）。
+        if branch == "docs-site":
+            continue
         commits.update(new_commits(local_sha, remote_sha, all_content=True))
     if not commits:
         return None
@@ -273,7 +276,7 @@ def main():
             p = line.split()
             if len(p) == 2:
                 n = p[1].replace("refs/heads/", "")
-                if n != "main":
+                if n not in ("main", "docs-site"):
                     existing.append((p[0], n))   # 例外分支：可接续的候选
 
     fresh = []

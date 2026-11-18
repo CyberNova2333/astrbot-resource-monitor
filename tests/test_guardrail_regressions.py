@@ -295,6 +295,14 @@ class PushScopeTests(unittest.TestCase):
             if code == 2:
                 self.assertIn('放行', errors.getvalue())
 
+    def test_docs_site_branch_is_allowed_and_skips_compiled_bundle_endpoint_scan(self):
+        branch_rules = load_module('branch_rules_regression', 'tools/githooks/_branchrules.py')
+        self.assertEqual(branch_rules.problems('docs-site'), [])
+        refs = [('1' * 40, 'docs-site', '0' * 40)]
+        with patch.object(PRE_PUSH, 'new_commits') as commits:
+            self.assertIsNone(PRE_PUSH.check_endpoints(refs))
+            commits.assert_not_called()
+
 
 class PrivateCacheTests(unittest.TestCase):
     def setUp(self):

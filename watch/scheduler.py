@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-only
+# This file is part of AstrBot Resource Monitor and is licensed under GNU AGPLv3 with Additional Terms (see LICENSE and ADDITIONAL_TERMS.zh-CN.md; ref: ADDITIONAL_TERMS.en.md).
 """轮转调度：这一轮该探哪一块，以及什么该隔多久才探一次。
 
 ## 为什么是轮转，不是随机
