@@ -4,7 +4,7 @@
 **项目名称：** AstrBot Resource Monitor  
 **开发、维护或联合推出主体：** CyberNova  
 **上游仓库：** https://github.com/CyberNova2333/astrbot-resource-monitor  
-**配套英文译文文件：** `ADDITIONAL_TERMS.en.md`  
+**配套英文译文文件：** `LICENSE-ADDITIONAL_TERMS-en.md`  
 
 > **部署与授权提示：** 依据 AGPLv3 第 7 条，正式启用本文件时，应在相关源文件中写明适用的附加条款，或载明指向本文件的声明；可以同时在项目根目录 `LICENSE` 或其他许可说明文件中集中说明适用范围及查阅位置。其中第九条第 9.5–9.6 款的附加许可豁免仅对已取得相应版权持有人有效授权的适用材料生效，未取得该等授权的第三方或外部贡献材料仍受其原有有效许可约束。
 
@@ -12,7 +12,7 @@
 
 ## 第一部分 AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文简明版）
 
-> **重要声明：** 本第一部分（简体中文简明版）仅为方便快速了解核心规则而设的阅读摘要，不具有独立法律效力，亦不替代、解释或修改正式条款。**本文件（`ADDITIONAL_TERMS.zh-CN.md`）及对应英文译文文件（`ADDITIONAL_TERMS.en.md`）中所有条款的最终解释与适用，均以 ADDITIONAL_TERMS.zh-CN.md 第二部分“AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文完整版）”正文为准**（底层的 AGPLv3 协议仍以其官方英文原文为准）。
+> **重要声明：** 本第一部分（简体中文简明版）仅为方便快速了解核心规则而设的阅读摘要，不具有独立法律效力，亦不替代、解释或修改正式条款。**本文件（`LICENSE-ADDITIONAL_TERMS-zh-CN.md`）及对应英文译文文件（`LICENSE-ADDITIONAL_TERMS-en.md`）中所有条款的最终解释与适用，均以 LICENSE-ADDITIONAL_TERMS-zh-CN.md 第二部分“AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文完整版）”正文为准**（底层的 AGPLv3 协议仍以其官方英文原文为准）。
 
 ### 你可以自由地（你的权利）
 
@@ -152,6 +152,6 @@
 
 ### 第十条 简体中文完整版优先
 
-10.1 本附加条款文件体系以 ADDITIONAL_TERMS.zh-CN.md 第二部分“AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文完整版）”正文为具有法律效力的原始文本。ADDITIONAL_TERMS.zh-CN.md 第一部分“AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文简明版）”以及独立分发的英文文本文件 `ADDITIONAL_TERMS.en.md`（包括其中的第一部分英文简明版与第二部分英文完整版参考译文）均仅为阅读与理解参考，不具有独立法律效力。上述任何简明版、英文译文与 ADDITIONAL_TERMS.zh-CN.md 第二部分“AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文完整版）”正文之间如存在歧义、差异或不一致，均以 ADDITIONAL_TERMS.zh-CN.md 第二部分“AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文完整版）”正文为准。
+10.1 本附加条款文件体系以 LICENSE-ADDITIONAL_TERMS-zh-CN.md 第二部分“AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文完整版）”正文为具有法律效力的原始文本。LICENSE-ADDITIONAL_TERMS-zh-CN.md 第一部分“AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文简明版）”以及独立分发的英文文本文件 `LICENSE-ADDITIONAL_TERMS-en.md`（包括其中的第一部分英文简明版与第二部分英文完整版参考译文）均仅为阅读与理解参考，不具有独立法律效力。上述任何简明版、英文译文与 LICENSE-ADDITIONAL_TERMS-zh-CN.md 第二部分“AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文完整版）”正文之间如存在歧义、差异或不一致，均以 LICENSE-ADDITIONAL_TERMS-zh-CN.md 第二部分“AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文完整版）”正文为准。
 
 10.2 前款仅确定本附加条款文件体系自身各部分及各语言文本之间的优先顺序，不适用于 AGPLv3 或另行引用的独立资产许可证。AGPLv3 仍以其官方英文原文为准；独立资产许可证依其自身的文本及语言规则适用。不得援引本条扩大本附加条款的约束范围，或使 AGPLv3 不允许的限制获得效力。

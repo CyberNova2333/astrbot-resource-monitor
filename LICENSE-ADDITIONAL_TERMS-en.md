@@ -4,7 +4,7 @@
 **Project Name:** AstrBot Resource Monitor  
 **Developing, Maintaining, or Co-Launching Parties:** CyberNova  
 **Upstream Repository:** https://github.com/CyberNova2333/astrbot-resource-monitor  
-**Authoritative Chinese File:** `ADDITIONAL_TERMS.zh-CN.md`  
+**Authoritative Chinese File:** `LICENSE-ADDITIONAL_TERMS-zh-CN.md`  
 
 > **Deployment and Authorization Notice:** Pursuant to Section 7 of AGPLv3, when formally adopting this document, the applicable additional terms or a notice pointing to this document must be placed in the relevant source files; a centralized explanation of the scope of application and where to locate these terms may also be placed in the repository's root `LICENSE` or other licensing documentation. The additional permission exemptions in Sections 9.5–9.6 of Article 9 take effect solely with respect to Covered Material for which valid authorization has been obtained from the relevant copyright holders; third-party or externally contributed materials for which such authorization has not been obtained remain governed by their existing valid licenses.
 
@@ -12,7 +12,7 @@
 
 ## Part 1. AstrBot Resource Monitor AGPLv3 Additional Terms and Rules on Assets and Project Identifiers (English Plain-Language Summary)
 
-> **IMPORTANT NOTICE:** This Part 1 (English Plain-Language Summary) is provided solely for quick reference and ease of reading. It has no independent legal force and does not replace, interpret, or modify the full legal text. **All terms of this file (`ADDITIONAL_TERMS.en.md`) and its corresponding Chinese file (`ADDITIONAL_TERMS.zh-CN.md`) are governed exclusively by the body text of ADDITIONAL_TERMS.zh-CN.md, Part 2: "AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文完整版）"** (while the underlying AGPLv3 license remains governed by its official English original).
+> **IMPORTANT NOTICE:** This Part 1 (English Plain-Language Summary) is provided solely for quick reference and ease of reading. It has no independent legal force and does not replace, interpret, or modify the full legal text. **All terms of this file (`LICENSE-ADDITIONAL_TERMS-en.md`) and its corresponding Chinese file (`LICENSE-ADDITIONAL_TERMS-zh-CN.md`) are governed exclusively by the body text of LICENSE-ADDITIONAL_TERMS-zh-CN.md, Part 2: "AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文完整版）"** (while the underlying AGPLv3 license remains governed by its official English original).
 
 ### You are free to (Your Rights)
 * **Use, Modify, and Distribute:** Copy, run, modify, commercially use, and distribute the code under AGPLv3 without seeking separate approval from the Project Parties.
@@ -33,7 +33,7 @@
 
 ## Part 2. AstrBot Resource Monitor AGPLv3 Additional Terms and Rules on Assets and Project Identifiers (English Full Text · Reference Translation)
 
-> **NOTICE:** Pursuant to Article 10, the body text of ADDITIONAL_TERMS.zh-CN.md, Part 2: "AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文完整版）" is the legally authoritative original text. This Part 2 of `ADDITIONAL_TERMS.en.md` (English Full Text · Reference Translation), Part 1 of `ADDITIONAL_TERMS.en.md` (English Plain-Language Summary), and Part 1 of `ADDITIONAL_TERMS.zh-CN.md` (Simplified Chinese Plain-Language Summary) are provided for reference only and have no independent legal force.
+> **NOTICE:** Pursuant to Article 10, the body text of LICENSE-ADDITIONAL_TERMS-zh-CN.md, Part 2: "AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文完整版）" is the legally authoritative original text. This Part 2 of `LICENSE-ADDITIONAL_TERMS-en.md` (English Full Text · Reference Translation), Part 1 of `LICENSE-ADDITIONAL_TERMS-en.md` (English Plain-Language Summary), and Part 1 of `LICENSE-ADDITIONAL_TERMS-zh-CN.md` (Simplified Chinese Plain-Language Summary) are provided for reference only and have no independent legal force.
 
 ### Article 1. Scope, Parties, and Definitions
 
@@ -151,6 +151,6 @@
 
 ### Article 10. Precedence of the Simplified Chinese Full Text
 
-10.1 Within this additional terms documentation set, the body text of ADDITIONAL_TERMS.zh-CN.md, Part 2: "AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文完整版）" is the legally authoritative original text. Part 1 of `ADDITIONAL_TERMS.zh-CN.md` ("AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文简明版）") and the separately distributed English file `ADDITIONAL_TERMS.en.md` (including both Part 1, English Plain-Language Summary, and Part 2, English Full Text Reference Translation) are provided solely for reading and comprehension reference and have no independent legal force. In the event of any ambiguity, discrepancy, or inconsistency between any plain-language summary or English translation and the body text of ADDITIONAL_TERMS.zh-CN.md, Part 2: "AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文完整版）", the latter shall prevail.
+10.1 Within this additional terms documentation set, the body text of LICENSE-ADDITIONAL_TERMS-zh-CN.md, Part 2: "AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文完整版）" is the legally authoritative original text. Part 1 of `LICENSE-ADDITIONAL_TERMS-zh-CN.md` ("AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文简明版）") and the separately distributed English file `LICENSE-ADDITIONAL_TERMS-en.md` (including both Part 1, English Plain-Language Summary, and Part 2, English Full Text Reference Translation) are provided solely for reading and comprehension reference and have no independent legal force. In the event of any ambiguity, discrepancy, or inconsistency between any plain-language summary or English translation and the body text of LICENSE-ADDITIONAL_TERMS-zh-CN.md, Part 2: "AstrBot Resource Monitor AGPLv3 附加条款及资产与项目标识规则（简体中文完整版）", the latter shall prevail.
 
 10.2 The preceding paragraph determines solely the order of precedence among the parts and language versions of this additional terms documentation set itself, and does not apply to AGPLv3 or separately referenced standalone asset licenses. AGPLv3 remains governed by its official English original; standalone asset licenses apply according to their own texts and language rules. This Article shall not be invoked to expand the binding scope of these additional terms or to give effect to restrictions not permitted by AGPLv3.
