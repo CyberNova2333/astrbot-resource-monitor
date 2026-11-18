@@ -58,5 +58,8 @@
       "en": "Chunk verification, IP filtering, and alert deduplication are complete."
     }
   },
+  "additionalTermsConsent": {
+    "CyberNova": true
+  },
   "updatedAt": "2026-11-17"
 }

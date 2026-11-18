@@ -1,0 +1,15 @@
+# AUTHORS — 贡献者与署名清单
+#
+# 本文件由持续集成工作流在 Push 后依据当前完整 Git 提交历史自动生成与更新。
+# 仅保留当前完整历史中的有效贡献者，并将人类贡献者与 AI Agent 显著区分。
+# 人类贡献者对附加条款的意见状态依据仓库根目录 meta.json (additionalTermsConsent) 记录；未作表示或未覆盖者标记为“未发表意见”。
+
+## 人类贡献者 (Human Contributors)
+
+- CyberNova <295488275+CyberNova2333@users.noreply.github.com> (https://github.com/CyberNova2333) [Committer, Author] [附加条款：已明确同意]
+
+## AI Agent 与辅助助手 (AI Agents)
+
+- Claude <noreply@anthropic.com> [Co-authored-by]
+- Codex <noreply@openai.com> [Co-authored-by]
+- gemini-code-assist <200291788+gemini-code-assist@users.noreply.github.com> (https://github.com/apps/gemini-code-assist) [Co-authored-by]
