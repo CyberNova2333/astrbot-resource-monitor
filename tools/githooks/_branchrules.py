@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-only
+# This file is part of AstrBot Resource Monitor and is licensed under GNU AGPLv3 with Additional Terms (see LICENSE and LICENSE-ADDITIONAL_TERMS-zh-CN.md; ref: LICENSE-ADDITIONAL_TERMS-en.md).
 """分支名判据。pre-push 钩子与 tools/check-branch-hygiene.py 共用这一份。
 
 判据只有一份，因为两处查的是同一件事、只是时刻不同（推之前 / 体检时）。

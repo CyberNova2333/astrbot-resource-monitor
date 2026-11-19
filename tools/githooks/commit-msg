@@ -16,6 +16,8 @@ if [ "$repo_guard_found" != 1 ]; then
     exit 1
 fi
 # repo-maintenance-guard: end
+# SPDX-License-Identifier: AGPL-3.0-only
+# This file is part of AstrBot Resource Monitor and is licensed under GNU AGPLv3 with Additional Terms (see LICENSE and LICENSE-ADDITIONAL_TERMS-zh-CN.md; ref: LICENSE-ADDITIONAL_TERMS-en.md).
 # commit-msg 钩子的启动层。真正的实现在 commit_msg.py，这一层只做一件事：
 # **找到一个能用的 Python 3**。
 #

@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-only
+# This file is part of AstrBot Resource Monitor and is licensed under GNU AGPLv3 with Additional Terms (see LICENSE and LICENSE-ADDITIONAL_TERMS-zh-CN.md; ref: LICENSE-ADDITIONAL_TERMS-en.md).
 """commit-msg 钩子：把 CLAUDE.md / AGENTS.md 的提交规范变成硬拦截。
 
 装法见 tools/install-hooks.sh。拦下的三条都是文档里写死的：

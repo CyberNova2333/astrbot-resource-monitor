@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-only
+# This file is part of AstrBot Resource Monitor and is licensed under GNU AGPLv3 with Additional Terms (see LICENSE and LICENSE-ADDITIONAL_TERMS-zh-CN.md; ref: LICENSE-ADDITIONAL_TERMS-en.md).
 """守住铁律 1：**任何具体地址、凭证都不进版本库**。
 
 用法：python3 tools/check-no-endpoints.py [--verbose] [--commits-stdin]
@@ -60,6 +62,7 @@ ALLOWED_HOSTS = (
     "www.rfc-editor.org", "datatracker.ietf.org", "developer.mozilla.org",
     # 许可证
     "www.gnu.org", "www.fsf.org", "spdx.org", "opensource.org", "scripts.sil.org",
+    "www.apache.org", "openfontlicense.org", "creativecommons.org",
     # 本机回环
     "127.0.0.1", "0.0.0.0", "::1",
 )
@@ -71,7 +74,9 @@ ALLOWED_MAIL_DOMAINS = ("anthropic.com", "openai.com", "moonshot.cn",
                         "example.test", "example.com")
 
 # 整份豁免的文件：许可证原文、以及本脚本自己（它必须写得出这些模式）。
-EXEMPT_PATHS = ("LICENSE", "LICENSE.additional-terms", "THIRD-PARTY-NOTICES.md",
+EXEMPT_PATHS = ("LICENSE", "LICENSE-ADDITIONAL_TERMS-zh-CN.md",
+                "LICENSE-ADDITIONAL_TERMS-en.md", "IMPLEMENTATION-GUIDE.zh-en.md",
+                "ASSETS_LICENSES.md", "THIRD-PARTY-NOTICES.md",
                 "tools/check-no-endpoints.py")
 
 

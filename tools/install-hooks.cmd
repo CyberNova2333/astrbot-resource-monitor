@@ -1,4 +1,6 @@
 @echo off
+REM SPDX-License-Identifier: AGPL-3.0-only
+REM This file is part of AstrBot Resource Monitor and is licensed under GNU AGPLv3 with Additional Terms (see LICENSE and LICENSE-ADDITIONAL_TERMS-zh-CN.md; ref: LICENSE-ADDITIONAL_TERMS-en.md).
 REM ── Windows 上装本仓库的 git 钩子 ────────────────────────────────────
 REM
 REM 与 tools\install-hooks.sh 等价，只是不用先开 Git Bash。做的事就一件：

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: AGPL-3.0-only
+# This file is part of AstrBot Resource Monitor and is licensed under GNU AGPLv3 with Additional Terms (see LICENSE and LICENSE-ADDITIONAL_TERMS-zh-CN.md; ref: LICENSE-ADDITIONAL_TERMS-en.md).
 """PreToolUse 钩子（matcher: Bash）—— 让 tools/githooks/ 里的 git 钩子**自动生效**。
 
 Claude Code 与 Codex CLI 都支持项目内的 PreToolUse 钩子，且都是「跟着仓库走、
