@@ -29,7 +29,7 @@ python -m compileall -q watch main.py
 - 例外仅 `hotfix/<用途>`（24 小时）与 `surgery/<用途>`（72 小时），全会话最多一条。用途至少两个有意义的 kebab 词，非随机串、纯日期或泛称。已有可接续分支优先复用；远端非 main 在 2 小时内有活动且未删时不新开。
 - 开分支前 `python tools/check-branch-hygiene.py --can-branch` 退出 0 并登记 `ACTIVE.md`。退役前对有价值内容先打 `archive/<原分支名>` tag 并确认远端，再合入后退役；不得把 archive/research 当长期分支。
 - 标题 `type(scope): 中文描述`，允许 `feat fix refactor docs test chore ci perf build`；一功能一提交，正文说明原因，结尾 `文档: …` 交代变化或具体不影响原因。
-- 作者按实际人类参与者记，没有默认值，不确定先确认；Agent 仅 co-author，完整 `Name <email>`。已登记 `Claude <noreply@anthropic.com>` 和 `Codex <noreply@openai.com>`，新 Agent 首次贡献时登记。
+- 作者按实际人类参与者记，没有默认值，不确定先确认；Agent 仅 co-author，完整 `Name <email>`。已登记 `Claude <noreply@anthropic.com>`、`Codex <noreply@openai.com>` 和 `gemini-code-assist <200291788+gemini-code-assist@users.noreply.github.com>`，新 Agent 首次贡献时登记。
 - 所有非初始提交必须 SSH 签名，不用未签名提交或 Agent 通用密钥；私钥留本机，只交公钥登记。历史克隆迁移遵守 README，不把旧历史合并或推回。
 
 ## 现有护栏与协作
